@@ -1,0 +1,206 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #040b1a;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  display: block;
+}
+
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(#081326, #111a2d 46%, #1a2847);
+}
+
+#ui {
+  position: fixed;
+  left: 18px;
+  top: 18px;
+  pointer-events: none;
+  color: #edf7ff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+
+.hud {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(9, 15, 28, 0.36);
+  backdrop-filter: blur(8px);
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 260px;
+}
+
+.title {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+#ui {
+  position: fixed;
+  left: 18px;
+  top: 18px;
+  width: calc(100vw - 36px);
+  height: calc(100vh - 36px);
+  pointer-events: none;
+  color: #edf7ff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+
+#speed-meter {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(9, 15, 28, 0.36);
+  backdrop-filter: blur(8px);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.speed-mini-label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.74;
+}
+
+#speed-readout {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: #ffd166;
+  min-width: 48px;
+  text-align: right;
+}
+
+#mini-map {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  width: 118px;
+  padding: 8px 8px 7px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(9, 15, 28, 0.38);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+  color: #edf7ff;
+}
+
+.mini-map-header {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.mini-map-track {
+  position: relative;
+  width: 18px;
+  height: 118px;
+  margin: 0 auto 8px;
+  border-radius: 9px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: linear-gradient(180deg, rgba(68, 104, 154, 0.1), rgba(18, 31, 46, 0.28));
+  overflow: hidden;
+}
+
+.mini-map-track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(103, 157, 255, 0.12), rgba(88, 200, 255, 0.04) 60%, rgba(28, 69, 92, 0.12));
+}
+
+.mini-map-water-line {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: 0;
+  height: 6px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(98, 201, 255, 0.88), rgba(37, 96, 150, 0.92));
+  box-shadow: 0 0 12px rgba(103, 214, 255, 0.5);
+}
+
+.mini-map-player {
+  position: absolute;
+  left: -4px;
+  width: 26px;
+  height: 9px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, #ffd166, #ff9f43);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.2), 0 0 14px rgba(255, 209, 102, 0.7);
+}
+
+.mini-map-data {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.hud {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(9, 15, 28, 0.36);
+  backdrop-filter: blur(8px);
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 260px;
+}
+
+.title {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.controls {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.note {
+  font-style: italic;
+  opacity: 0.8;
+}
