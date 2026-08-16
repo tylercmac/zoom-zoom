@@ -49,6 +49,12 @@ const windStreaks = Array.from({ length: 64 }, () => ({
   drift: Math.random() * 0.42 + 0.78
 }));
 
+const landscapeLayers = [
+  { depth: 0.0022, base: 0.69, amplitude: 30, frequency: 0.0048, color: 'rgba(48, 79, 104, 0.34)', seed: 0.8 },
+  { depth: 0.0045, base: 0.78, amplitude: 42, frequency: 0.0062, color: 'rgba(35, 68, 91, 0.42)', seed: 2.3 },
+  { depth: 0.008, base: 0.9, amplitude: 58, frequency: 0.008, color: 'rgba(23, 52, 74, 0.52)', seed: 4.6 }
+];
+
 let camera = { x: 0, y: 0 };
 let lastTime = performance.now();
 
@@ -107,12 +113,24 @@ function drawBackground() {
   const progress = Math.min(1, Math.max(0, (player.pos.y - world.perch.y) / Math.max(1, world.ground.y - world.perch.y)));
   const speedMph = Math.hypot(player.vel.x, player.vel.y) * 0.032;
   const windStrength = Math.min(1, Math.max(0, (speedMph - 72) / 135));
+  const atmosphereRaw = Math.min(1, Math.max(0, (progress - 0.28) / 0.54));
+  const atmosphereBlend = atmosphereRaw * atmosphereRaw * (3 - 2 * atmosphereRaw);
   const sky = ctx.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, progress > 0.45 ? '#06152a' : '#030816');
-  sky.addColorStop(0.5, progress > 0.45 ? '#163450' : '#0b1930');
-  sky.addColorStop(1, progress > 0.45 ? '#315c76' : '#182944');
+  sky.addColorStop(0, '#030816');
+  sky.addColorStop(0.5, '#0b1930');
+  sky.addColorStop(1, '#182944');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, height);
+
+  const lowerSky = ctx.createLinearGradient(0, 0, 0, height);
+  lowerSky.addColorStop(0, '#06152a');
+  lowerSky.addColorStop(0.5, '#163450');
+  lowerSky.addColorStop(1, '#315c76');
+  ctx.save();
+  ctx.globalAlpha = atmosphereBlend;
+  ctx.fillStyle = lowerSky;
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
 
   for (const star of stars) {
     const sx = star.x - camera.x * star.depth;
@@ -161,32 +179,25 @@ function drawBackground() {
     ctx.restore();
   }
 
-  const bayReveal = Math.min(1, Math.max(0, (progress - 0.38) / 0.38));
-  if (bayReveal > 0.01) {
-    const bayY = height * 0.72;
-    const layerOffset = (camera.y * 0.07) % 120;
-
+  const landscapeReveal = Math.min(1, Math.max(0, (progress - 0.12) / 0.35));
+  if (landscapeReveal > 0.01) {
     ctx.save();
-    ctx.globalAlpha = 0.18 + bayReveal * 0.28;
-    const bay = ctx.createLinearGradient(0, bayY, 0, height);
-    bay.addColorStop(0, 'rgba(86, 126, 170, 0.0)');
-    bay.addColorStop(0.4, 'rgba(71, 112, 155, 0.15)');
-    bay.addColorStop(1, 'rgba(20, 39, 60, 0.5)');
-    ctx.fillStyle = bay;
-    ctx.fillRect(0, bayY, width, height - bayY);
-
-    ctx.fillStyle = 'rgba(72, 92, 110, 0.18)';
-    ctx.beginPath();
-    ctx.moveTo(0, bayY + 18 - layerOffset);
-    ctx.lineTo(width * 0.18, bayY - 18 - layerOffset);
-    ctx.lineTo(width * 0.4, bayY + 24 - layerOffset);
-    ctx.lineTo(width * 0.62, bayY - 20 - layerOffset);
-    ctx.lineTo(width * 0.86, bayY + 18 - layerOffset);
-    ctx.lineTo(width, bayY + 12 - layerOffset);
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    ctx.fill();
+    ctx.globalAlpha = landscapeReveal;
+    for (const layer of landscapeLayers) {
+      const baseY = height * layer.base - camera.y * layer.depth;
+      ctx.fillStyle = layer.color;
+      ctx.beginPath();
+      ctx.moveTo(-40, height + 2);
+      for (let x = -40; x <= width + 80; x += 42) {
+        const ridge = Math.sin(x * layer.frequency + layer.seed + camera.y * 0.000018)
+          * layer.amplitude
+          + Math.sin(x * layer.frequency * 2.7 + layer.seed * 3) * layer.amplitude * 0.32;
+        ctx.lineTo(x, baseY + ridge);
+      }
+      ctx.lineTo(width + 80, height + 2);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.restore();
   }
 
