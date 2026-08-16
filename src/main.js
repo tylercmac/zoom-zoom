@@ -22,20 +22,31 @@ player.onPerch = true;
 player.perchX = world.perch.x;
 player.perchW = world.perch.w;
 
-const stars = Array.from({ length: 700 }, () => ({
+const stars = Array.from({ length: 2600 }, () => ({
   x: Math.random() * world.width,
   y: Math.random() * world.height,
-  r: Math.random() * 2.6 + 1,
-  a: Math.random() * 0.9 + 0.2,
-  pulse: Math.random() * 1000
+  r: Math.random() * 1.7 + 0.35,
+  a: Math.random() * 0.66 + 0.18,
+  depth: Math.random() * 0.64 + 0.08,
+  pulse: Math.random() * 1000,
+  warm: Math.random() > 0.78
 }));
 
-const windStreaks = Array.from({ length: 26 }, () => ({
-  x: Math.random() * window.innerWidth,
-  y: Math.random() * window.innerHeight,
-  h: Math.random() * 80 + 24,
-  alpha: Math.random() * 0.28 + 0.04,
-  drift: Math.random() * 1.0 + 0.6
+const cloudBanks = Array.from({ length: 420 }, () => ({
+  x: Math.random() * (world.width + 700) - 350,
+  y: Math.random() * world.height,
+  w: Math.random() * 360 + 150,
+  h: Math.random() * 56 + 28,
+  depth: Math.random() * 0.28 + 0.72,
+  alpha: Math.random() * 0.13 + 0.035
+}));
+
+const windStreaks = Array.from({ length: 64 }, () => ({
+  x: Math.random(),
+  phase: Math.random(),
+  width: Math.random() * 1.5 + 0.5,
+  alpha: Math.random() * 0.22 + 0.05,
+  drift: Math.random() * 0.42 + 0.78
 }));
 
 let camera = { x: 0, y: 0 };
@@ -92,48 +103,65 @@ function update(dt) {
 function drawBackground() {
   const width = window.innerWidth;
   const height = window.innerHeight;
+  const now = performance.now() * 0.001;
+  const progress = Math.min(1, Math.max(0, (player.pos.y - world.perch.y) / Math.max(1, world.ground.y - world.perch.y)));
+  const speedMph = Math.hypot(player.vel.x, player.vel.y) * 0.032;
+  const windStrength = Math.min(1, Math.max(0, (speedMph - 72) / 135));
   const sky = ctx.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, '#040b1a');
-  sky.addColorStop(0.45, '#101c2d');
-  sky.addColorStop(1, '#1b2e45');
+  sky.addColorStop(0, progress > 0.45 ? '#06152a' : '#030816');
+  sky.addColorStop(0.5, progress > 0.45 ? '#163450' : '#0b1930');
+  sky.addColorStop(1, progress > 0.45 ? '#315c76' : '#182944');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, height);
 
-  const downwardSpeed = Math.max(0, player.vel.y);
-  const parallaxBoost = 1 + Math.min(0.7, downwardSpeed / 2600);
-
   for (const star of stars) {
-    const sx = (star.x - camera.x) * (1.1 + parallaxBoost * 0.16);
-    const sy = (star.y - camera.y) * (1.1 + parallaxBoost * 0.2);
+    const sx = star.x - camera.x * star.depth;
+    const sy = star.y - camera.y * star.depth;
     if (sx < -10 || sy < -10 || sx > width + 10 || sy > height + 10) continue;
-    const glow = 0.35 + (Math.sin((performance.now() + star.pulse) * 0.003) + 1) * 0.35;
-    ctx.fillStyle = `rgba(255,255,255,${star.a + glow * 0.2})`;
+    const glow = 0.58 + Math.sin((now * 2) + star.pulse) * 0.2;
+    ctx.fillStyle = star.warm
+      ? `rgba(255, 225, 177, ${star.a * glow})`
+      : `rgba(222, 239, 255, ${star.a * glow})`;
     ctx.beginPath();
     ctx.arc(sx, sy, star.r, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  const speedMph = Math.hypot(player.vel.x, player.vel.y) * 0.032;
-  const windStrength = Math.min(1, Math.max(0, (speedMph - 120) / 140));
+  ctx.save();
+  for (const cloud of cloudBanks) {
+    const cx = cloud.x - camera.x * cloud.depth;
+    const cy = cloud.y - camera.y * cloud.depth;
+    if (cx < -cloud.w || cy < -cloud.h * 2 || cx > width + cloud.w || cy > height + cloud.h * 2) continue;
+    const cloudAlpha = cloud.alpha * (0.25 + progress * 0.95);
+    ctx.fillStyle = `rgba(193, 221, 235, ${cloudAlpha})`;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, cloud.w * 0.5, cloud.h * 0.46, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx - cloud.w * 0.22, cy + cloud.h * 0.1, cloud.w * 0.28, cloud.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx + cloud.w * 0.2, cy - cloud.h * 0.08, cloud.w * 0.31, cloud.h * 0.58, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
   if (windStrength > 0.01) {
     ctx.save();
     ctx.lineCap = 'round';
     for (const streak of windStreaks) {
-      const x = (streak.x + (performance.now() * 0.01 * streak.drift) + camera.x * 0.04) % (width + 40) - 20;
-      const y = (streak.y + (performance.now() * 0.015 * streak.drift) + camera.y * 0.02) % (height + 40) - 20;
-      const alpha = streak.alpha * (0.2 + windStrength);
-      ctx.strokeStyle = `rgba(170, 214, 255, ${alpha})`;
-      ctx.lineWidth = 0.8 + windStrength * 1.7;
+      const length = 16 + windStrength * windStrength * (110 + streak.width * 46);
+      const travel = (now * (110 + windStrength * 1450) * streak.drift + streak.phase * (height + length * 2)) % (height + length * 2);
+      const x = streak.x * (width + 100) - 50 + Math.sin(now * 0.8 + streak.phase * 18) * windStrength * 16;
+      const y = height + length - travel;
+      const alpha = streak.alpha * windStrength;
+      ctx.strokeStyle = `rgba(192, 229, 255, ${alpha})`;
+      ctx.lineWidth = streak.width * (0.7 + windStrength * 0.8);
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x, y + streak.h * (0.5 + windStrength));
+      ctx.lineTo(x - player.vel.x * 0.018 * windStrength, y + length);
       ctx.stroke();
     }
     ctx.restore();
   }
 
-  const progress = Math.min(1, Math.max(0, (player.pos.y - world.perch.y) / Math.max(1, world.ground.y - world.perch.y)));
-  const bayReveal = Math.min(1, Math.max(0, (progress - 0.42) / 0.38));
+  const bayReveal = Math.min(1, Math.max(0, (progress - 0.38) / 0.38));
   if (bayReveal > 0.01) {
     const bayY = height * 0.72;
     const layerOffset = (camera.y * 0.07) % 120;
@@ -160,6 +188,14 @@ function drawBackground() {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+  }
+
+  if (windStrength > 0.25) {
+    const vignette = ctx.createRadialGradient(width * 0.5, height * 0.52, height * 0.18, width * 0.5, height * 0.5, height * 0.82);
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(1, `rgba(0, 10, 24, ${windStrength * 0.32})`);
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, width, height);
   }
 }
 
