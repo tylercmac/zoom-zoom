@@ -3,6 +3,7 @@ import mimetypes
 import os
 import threading
 import time
+from urllib.parse import urlsplit
 
 # Ensure .js served with correct MIME type for ES modules
 mimetypes.add_type('application/javascript', '.js')
@@ -32,11 +33,12 @@ def scan_max_mtime(root):
 
 class Handler(SimpleHTTPRequestHandler):
     def guess_type(self, path):
-        # Force correct MIME for .js modules; fall back to default guess for others
-        base, ext = os.path.splitext(path)
+        # Strip query strings before checking the extension so cache-busted URLs still resolve as JS modules.
+        clean_path = urlsplit(path).path
+        base, ext = os.path.splitext(clean_path)
         if ext == '.js':
             return 'application/javascript'
-        return super().guess_type(path)
+        return super().guess_type(clean_path)
 
     def end_headers(self):
         # Disable caching for development
