@@ -1,11 +1,13 @@
 <!doctype html>
 <html>
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sky Hopper</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
+
 <body>
   <canvas id="game" aria-label="Game canvas"></canvas>
   <div id="ui">
@@ -14,7 +16,7 @@
         <span class="title">Sky Hopper</span>
       </div>
       <div class="controls">Move: A/D or arrows · Glide: W/↑ · Dive: S/↓ · Flap: Space · Reset: R</div>
-      <div class="controls note">Possible future direction: a vertical falcon dive game set on the Golden Gate Bridge.</div>
+      <div id="hud-objective" class="controls note">Objective: Manage dive speed to hit the 200–210 MPH window and arrest before water.</div>
     </div>
     <div id="speed-meter">
       <span class="speed-mini-label">MPH</span>
@@ -24,6 +26,8 @@
       <div class="mini-map-header">World</div>
       <div class="mini-map-track">
         <div class="mini-map-water-line"></div>
+        <div id="mini-map-nest" class="mini-map-nest" title="Cliff Nest (~50%)"></div>
+        <div id="mini-map-target" class="mini-map-target" title="Target Dove (~90%)"></div>
         <div id="mini-map-player" class="mini-map-player"></div>
       </div>
       <div class="mini-map-data">
@@ -31,7 +35,34 @@
         <span id="mini-map-altitude">0%</span>
       </div>
     </div>
+
+    <!-- Bottom Horizontal Target Trajectory Tracker -->
+    <div id="target-tracker" aria-label="Horizontal Target Tracker">
+      <div id="target-reticle" class="target-reticle">
+        <div id="target-pointer" class="target-pointer">▲</div>
+        <div class="target-badge">
+          <span id="target-badge-label" class="target-badge-label">TARGET DOVE</span>
+          <span id="target-distance">0m</span>
+        </div>
+      </div>
+      <div id="target-edge-left" class="target-edge-indicator left hidden">
+        <span class="target-edge-arrow">◀</span>
+        <span id="target-edge-dist-left">0m</span>
+      </div>
+      <div id="target-edge-right" class="target-edge-indicator right hidden">
+        <span id="target-edge-dist-right">0m</span>
+        <span class="target-edge-arrow">▶</span>
+      </div>
+    </div>
+
+    <!-- Intercept Toast / Banner -->
+    <div id="intercept-banner" class="intercept-banner hidden">
+      <div id="banner-title" class="banner-title">🎯 TARGET INTERCEPTED!</div>
+      <div id="banner-subtitle" class="banner-subtitle">Strike Speed: <span id="intercept-speed">0</span> MPH · Press
+        <kbd>R</kbd> to Reset</div>
+    </div>
   </div>
   <script type="module" src="src/main.js"></script>
 </body>
+
 </html>

@@ -5,11 +5,15 @@ export default class Player {
 
   reset(x = 180, y = 300) {
     this.pos = { x, y };
+    this.prevPos = { x, y };
     this.vel = { x: 0, y: 0 };
     this.size = { w: 28, h: 22 };
     this.grounded = false;
     this.onPerch = false;
     this.inWater = false;
+    this.hasPrey = false;
+    this.currentPlatform = null;
+    this.landingAttempt = null;
     this.angle = 0;
     this.wingPhase = 0;
     this.flapBoost = 0;
@@ -29,7 +33,10 @@ export default class Player {
     this.straightLaunchTimer = 0;
   }
 
-  update(dt, input, platforms) {
+  update(dt, input, platforms = []) {
+    this.prevPos.x = this.pos.x;
+    this.prevPos.y = this.pos.y;
+
     const moveX = (input.left() ? -1 : 0) + (input.right() ? 1 : 0);
     const flapPressed = input.consumeFlap();
     const holdingSpace = input.flap();
@@ -40,9 +47,8 @@ export default class Player {
     const justPressedDown = holdS && !this.wasHoldingDown;
 
     const gravity = 340;
-    const flapAirImpulse = 260;
-    const maxFlightSpeed = 6600;
-    const maxRiseSpeed = 1100;
+    const maxFlightSpeed = 6562.5; // Strictly capped at 210 MPH (210 / 0.032)
+    const maxRiseSpeed = 1650;     // Responsive climb speed
     const directionBias = moveX !== 0 ? moveX : (this.vel.x >= 0 ? 1 : -1);
 
     if (this.onPerch) {
@@ -57,8 +63,9 @@ export default class Player {
       if (justPressedDown || (holdS && !this.wasHoldingDown)) {
         this.onPerch = false;
         this.grounded = false;
-        this.vel.y = 26;
-        this.vel.x = moveX * 58;
+        this.currentPlatform = null;
+        this.vel.y = 30;
+        this.vel.x = moveX * 60;
         this.takeoffEase = 1;
         this.perchDropTimer = 0.46;
         this.straightLaunchTimer = moveX === 0 ? 0.34 : 0;
@@ -87,74 +94,75 @@ export default class Player {
     }
 
     if (moveX !== 0) {
-      const acceleration = 320 + Math.abs(this.vel.x) * 1.1;
+      const acceleration = 340 + Math.abs(this.vel.x) * 1.15;
       this.vel.x += moveX * acceleration * dt;
     } else {
       this.vel.x *= Math.pow(0.89, dt * 60);
     }
 
+    // Gliding lift
     if (holdingW) {
       if (justPressedW) {
-        this.vel.y -= 52;
-        this.vel.x += directionBias * 68;
+        this.vel.y -= 75;
+        this.vel.x += directionBias * 85;
         this.glideCharge = 1;
       }
 
-      this.glideCharge = Math.max(0, this.glideCharge - dt * 2.1);
-      this.vel.y -= 18 * dt;
-      this.vel.x += directionBias * (110 + Math.abs(this.vel.x) * 0.2) * dt;
+      this.glideCharge = Math.max(0, this.glideCharge - dt * 1.8);
+      this.vel.y -= 42 * dt;
+      this.vel.x += directionBias * (130 + Math.abs(this.vel.x) * 0.25) * dt;
       if (this.vel.y < -maxRiseSpeed) this.vel.y = -maxRiseSpeed;
     } else {
       this.glideCharge = Math.max(0, this.glideCharge - dt * 2.8);
     }
 
+    // Diving acceleration (reaches 200–210 MPH swiftly on sustained stoop)
     if (holdS) {
-      this.diveCharge = Math.min(4.8, this.diveCharge + dt * 0.58);
-      const diveForce = 28 + this.diveCharge * 42 + Math.abs(this.vel.y) * 0.011;
+      this.diveCharge = Math.min(5.8, this.diveCharge + dt * 0.85);
+      const diveForce = 52 + this.diveCharge * 68 + Math.abs(this.vel.y) * 0.022;
       this.vel.y += diveForce * dt;
-      this.vel.x += directionBias * (8 + this.diveCharge * 16 + Math.abs(this.vel.y) * 0.006) * dt;
+      this.vel.x += directionBias * (12 + this.diveCharge * 20 + Math.abs(this.vel.y) * 0.008) * dt;
     } else {
       this.diveCharge = Math.max(0, this.diveCharge - dt * 1.5);
     }
 
-    this.vel.y += gravity * (holdingW ? 0.72 : 1) * dt;
+    this.vel.y += gravity * (holdingW ? 0.65 : 1) * dt;
 
     if (this.spaceFlapCooldown > 0) {
       this.spaceFlapCooldown = Math.max(0, this.spaceFlapCooldown - dt);
     }
 
-    // Holding Space is a reliable pull-out: it continuously bleeds vertical dive
-    // speed, while still producing regular flap strokes. Fresh taps get a stronger
-    // stroke, so skilled players can arrest later without making holding useless.
+    // Holding Space is an active airbrake and stoop arrest
     if (holdingSpace) {
       const downwardSpeed = Math.max(0, this.vel.y);
-      const arrestForce = 205 + downwardSpeed * 0.25;
+      const arrestForce = 240 + downwardSpeed * 0.32;
       this.vel.y -= arrestForce * dt;
-      this.vel.x *= Math.pow(0.992, dt * 60);
+      this.vel.x *= Math.pow(0.99, dt * 60);
     }
 
+    // Flapping / climbing impulse
     const shouldFlap = flapPressed || (holdingSpace && this.spaceFlapCooldown <= 0);
     if (shouldFlap) {
       const currentRise = Math.max(0, -this.vel.y);
       const downwardSpeed = Math.max(0, this.vel.y);
-      const riseRamp = Math.min(1, currentRise / 220);
-      const liftCurve = 110 + riseRamp * 160;
-      const diveLift = Math.min(180, downwardSpeed * 0.075);
+      const riseRamp = Math.min(1, currentRise / 320);
+      const liftCurve = 140 + riseRamp * 210;
+      const diveLift = Math.min(220, downwardSpeed * 0.09);
       const strokeMultiplier = flapPressed
-        ? (justPressedSpace ? 1 : 1.24)
-        : 0.56;
+        ? (justPressedSpace ? 1.05 : 1.35)
+        : 0.65;
       const effectiveLift = liftCurve + diveLift;
-      this.vel.y -= effectiveLift * 0.72 * strokeMultiplier;
+      this.vel.y -= effectiveLift * 0.85 * strokeMultiplier;
 
       if (Math.abs(moveX) < 0.5) {
-        this.vel.y -= Math.min(14, currentRise * 0.03);
+        this.vel.y -= Math.min(24, currentRise * 0.04);
       }
 
-      const lateralBoost = moveX !== 0 ? directionBias * (24 + Math.abs(this.vel.x) * 0.06) : 0;
+      const lateralBoost = moveX !== 0 ? directionBias * (28 + Math.abs(this.vel.x) * 0.07) : 0;
       this.vel.x += lateralBoost;
       this.glideCharge = 0;
       this.diveCharge = Math.max(0, this.diveCharge - 0.4);
-      this.flapBoost = 1.1;
+      this.flapBoost = 1.15;
       this.grounded = false;
       this.spaceFlapCooldown = 0.14;
     } else {
@@ -163,17 +171,13 @@ export default class Player {
 
     if (this.vel.y < -maxRiseSpeed) this.vel.y = -maxRiseSpeed;
 
-    const speed = Math.hypot(this.vel.x, this.vel.y);
-    if (speed > maxFlightSpeed) {
-      const scale = maxFlightSpeed / speed;
-      this.vel.x *= scale;
-      this.vel.y *= scale;
-    }
-
+    // Uncapped downward dive speed: player must actively manage speed (with Space/W) to stay in 200–210 MPH window and arrest before water
     this.pos.x += this.vel.x * dt;
     this.pos.y += this.vel.y * dt;
 
     this.grounded = false;
+
+    // 1. Water collision
     const ground = platforms[0] || null;
     if (ground) {
       const overlapsWater = this.pos.y + this.size.h > ground.y && this.pos.y < ground.y + ground.h;
@@ -182,12 +186,9 @@ export default class Player {
         const depth = Math.min(1, Math.max(0, (this.pos.y + this.size.h - ground.y) / this.size.h));
         this.vel.x *= Math.pow(0.91, dt * 60);
 
-        // Water heavily slows a downward impact, but a flap is an intentional
-        // escape stroke. Holding Space treads water; repeated fresh taps are
-        // required for the frantic escape burst.
         if (shouldFlap) {
           const activeEscapeStroke = flapPressed && !justPressedSpace;
-          const waterLift = activeEscapeStroke ? 145 + depth * 45 : 38 + depth * 15;
+          const waterLift = activeEscapeStroke ? 155 + depth * 50 : 42 + depth * 18;
           this.vel.y -= waterLift;
           this.flapBoost = 1.3;
           if (!activeEscapeStroke && this.vel.y < 0) this.vel.y *= 0.42;
@@ -201,20 +202,51 @@ export default class Player {
       this.inWater = false;
     }
 
-    const perch = platforms[1] || null;
-    if (perch && this.perchDropTimer <= 0 && this.vel.y >= 0) {
-      const overlapsPerch = this.pos.x + this.size.w > perch.x && this.pos.x < perch.x + perch.w && this.pos.y + this.size.h > perch.y && this.pos.y < perch.y + perch.h;
-      if (overlapsPerch) {
-        this.pos.y = perch.y - this.size.h;
-        this.vel.y = 0;
-        this.vel.x = 0;
-        this.onPerch = true;
-        this.grounded = true;
-        this.diveCharge = 0;
-        this.perchX = perch.x;
-        this.perchW = perch.w;
-        this.perchDropTimer = 0;
-        this.pos.x = Math.min(Math.max(this.pos.x, perch.x), perch.x + perch.w - this.size.w);
+    // 2. Perch and Cliff Nest platforms
+    this.landingAttempt = null;
+    for (let i = 1; i < platforms.length; i++) {
+      const plat = platforms[i];
+      if (!plat) continue;
+
+      if (this.perchDropTimer <= 0 && this.vel.y >= 0) {
+        const overlaps = this.pos.x + this.size.w > plat.x &&
+                         this.pos.x < plat.x + plat.w &&
+                         this.pos.y + this.size.h > plat.y &&
+                         this.pos.y < plat.y + plat.h;
+        if (overlaps) {
+          const landingSpeed = Math.hypot(this.vel.x, this.vel.y);
+          const isGentle = landingSpeed <= 240;
+
+          if (plat.isNest) {
+            this.landingAttempt = {
+              platform: plat,
+              speed: landingSpeed,
+              speedMph: Math.round(landingSpeed * 0.032),
+              isGentle: isGentle
+            };
+
+            if (!isGentle) {
+              // Too harsh: bounce falcon slightly and prevent perching
+              this.vel.y = -90;
+              this.vel.x *= 0.4;
+              this.perchDropTimer = 0.4;
+              continue;
+            }
+          }
+
+          this.pos.y = plat.y - this.size.h;
+          this.vel.y = 0;
+          this.vel.x = 0;
+          this.onPerch = true;
+          this.currentPlatform = plat;
+          this.grounded = true;
+          this.diveCharge = 0;
+          this.perchX = plat.x;
+          this.perchW = plat.w;
+          this.perchDropTimer = 0;
+          this.pos.x = Math.min(Math.max(this.pos.x, plat.x), plat.x + plat.w - this.size.w);
+          break;
+        }
       }
     }
 
@@ -253,8 +285,8 @@ export default class Player {
     const tailSweep = Math.sin(this.wingPhase * 0.8 + 1.1) * 5 * (1 - diveTuck * 0.5);
 
     ctx.translate(this.pos.x + this.size.w / 2, this.pos.y + this.size.h / 2);
+
     if (this.onPerch) {
-      // A perched raptor is upright, balanced on its feet, with folded wings.
       ctx.scale(this.facing, 1);
       if (!this.perchMoving) {
         ctx.strokeStyle = '#d5a84a';
@@ -267,6 +299,27 @@ export default class Player {
         ctx.lineTo(6, 12);
         ctx.lineTo(1, 12);
         ctx.stroke();
+
+        // Captured prey beside perched falcon
+        if (this.hasPrey) {
+          ctx.save();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.ellipse(8, 10, 10, 6, 0.1, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#cbd5e1';
+          ctx.beginPath();
+          ctx.ellipse(6, 11, 7, 3.5, 0.1, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#f97316';
+          ctx.beginPath();
+          ctx.moveTo(17, 9);
+          ctx.lineTo(21, 10);
+          ctx.lineTo(17, 12);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
 
         ctx.fillStyle = '#354557';
         ctx.beginPath();
@@ -304,14 +357,15 @@ export default class Player {
         ctx.fill();
         ctx.fillStyle = '#d5a84a';
         ctx.beginPath();
-        ctx.moveTo(-3, -20);
-        ctx.lineTo(3, -20);
-        ctx.lineTo(0, -15);
+        ctx.moveTo(-2.5, -20);
+        ctx.lineTo(2.5, -20);
+        ctx.lineTo(0, -16.5);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
         return;
       }
+
       ctx.strokeStyle = '#d5a84a';
       ctx.lineWidth = 1.3;
       ctx.beginPath();
@@ -351,11 +405,13 @@ export default class Player {
       ctx.arc(10, -25, 1.5, 0, Math.PI * 2);
       ctx.fill();
 
+      // Short hooked beak (perched moving)
       ctx.fillStyle = '#d5a84a';
       ctx.beginPath();
-      ctx.moveTo(12, -22);
-      ctx.lineTo(19, -20);
-      ctx.lineTo(12, -18);
+      ctx.moveTo(11, -22.5);
+      ctx.lineTo(15.5, -21.5);
+      ctx.lineTo(16, -19.5);
+      ctx.lineTo(11, -19);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -364,7 +420,6 @@ export default class Player {
 
     if (this.straightLaunchTimer > 0) {
       const launchProgress = 1 - this.straightLaunchTimer / 0.34;
-      // A brief front-on launch pose bridges the upright perch and the stoop.
       ctx.scale(1 - launchProgress * 0.08, 1 + launchProgress * 0.08);
       ctx.rotate(launchProgress * 0.34);
       ctx.fillStyle = '#354557';
@@ -392,9 +447,9 @@ export default class Player {
       ctx.fill();
       ctx.fillStyle = '#d5a84a';
       ctx.beginPath();
-      ctx.moveTo(-3, -18);
-      ctx.lineTo(3, -18);
-      ctx.lineTo(0, -13);
+      ctx.moveTo(-2.5, -18);
+      ctx.lineTo(2.5, -18);
+      ctx.lineTo(0, -15);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -412,8 +467,6 @@ export default class Player {
     ctx.rotate(this.angle * 0.85 + frontBlend * 0.12);
 
     if (transitioningProfile) {
-      // A banked intermediate silhouette bridges the broad side view and the
-      // tucked back view while the player steers into or out of a stoop.
       const wingReach = 28 - frontBlend * 7;
       ctx.fillStyle = '#9bacb4';
       ctx.beginPath();
@@ -444,21 +497,21 @@ export default class Player {
       ctx.closePath();
       ctx.fill();
 
-      // Keep the leading head mass visible through the bank; fading this out
-      // was making the beak appear detached at near-vertical angles.
       ctx.fillStyle = '#32495a';
       ctx.beginPath();
       ctx.ellipse(13, 0, 7, 7.4, 0.18, 0, Math.PI * 2);
       ctx.fill();
+
+      // Short hooked beak (transitioning)
       ctx.fillStyle = '#d5a84a';
       ctx.beginPath();
-      ctx.moveTo(18, -1.5);
-      ctx.lineTo(28, 3);
-      ctx.lineTo(18, 6);
+      ctx.moveTo(17, -1);
+      ctx.lineTo(23.5, 0.5);
+      ctx.lineTo(24, 3);
+      ctx.lineTo(17, 4.5);
       ctx.closePath();
       ctx.fill();
     } else if (frontProfile) {
-      // In a straight-down stoop we see the falcon's back and tightly folded wings.
       ctx.fillStyle = '#718896';
       ctx.beginPath();
       ctx.ellipse(0, 0, 15, 10, 0, 0, Math.PI * 2);
@@ -495,8 +548,6 @@ export default class Player {
       ctx.ellipse(1, 0, 9, 6.5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // The hood sits at the leading (downward) end of the stoop. It gives the
-      // back view a clear head without exposing the face or beak.
       ctx.fillStyle = '#32495a';
       ctx.beginPath();
       ctx.ellipse(15, 0, 7.5, 7.2, 0, 0, Math.PI * 2);
@@ -506,11 +557,13 @@ export default class Player {
       ctx.ellipse(14, -1, 3.5, 4.5, 0, 0, Math.PI * 2);
       ctx.fill();
 
+      // Short hooked beak (front stoop)
       ctx.fillStyle = '#d5a84a';
       ctx.beginPath();
-      ctx.moveTo(20, -1.5);
-      ctx.lineTo(29, 2.5);
-      ctx.lineTo(20, 5.5);
+      ctx.moveTo(19, -1);
+      ctx.lineTo(24.5, 1);
+      ctx.lineTo(25, 3.5);
+      ctx.lineTo(19, 4.5);
       ctx.closePath();
       ctx.fill();
 
@@ -521,7 +574,7 @@ export default class Player {
       ctx.lineTo(10, 0);
       ctx.stroke();
     } else {
-      // Side profile is the broad-winged glide / flare state.
+      // Side profile glide / flare
       ctx.fillStyle = '#e6ded0';
       ctx.beginPath();
       ctx.ellipse(0, 0, 18, 9, 0.15, 0, Math.PI * 2);
@@ -553,28 +606,6 @@ export default class Player {
       ctx.closePath();
       ctx.fill();
 
-      if (divePose) {
-        const talonAlpha = Math.min(0.9, diveTuck * 1.45);
-        ctx.save();
-        ctx.globalAlpha = talonAlpha;
-        ctx.strokeStyle = '#d5a84a';
-        ctx.lineWidth = 1.35;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(1, 6);
-        ctx.lineTo(7, 10);
-        ctx.lineTo(13, 9);
-        ctx.moveTo(7, 10);
-        ctx.lineTo(11, 14);
-        ctx.moveTo(6, 5);
-        ctx.lineTo(11, 9);
-        ctx.lineTo(16, 8);
-        ctx.moveTo(11, 9);
-        ctx.lineTo(15, 13);
-        ctx.stroke();
-        ctx.restore();
-      }
-
       ctx.fillStyle = '#202a37';
       ctx.beginPath();
       ctx.ellipse(12, 0, 6.5, 7, 0.18, 0, Math.PI * 2);
@@ -590,13 +621,97 @@ export default class Player {
       ctx.arc(14, 0, 2.1, 0, Math.PI * 2);
       ctx.fill();
 
+      // Short hooked raptor beak (side glide)
       ctx.fillStyle = '#d5a84a';
       ctx.beginPath();
-      ctx.moveTo(18, 2);
-      ctx.lineTo(31, 5);
-      ctx.lineTo(18, 9);
+      ctx.moveTo(16.5, 1);
+      ctx.lineTo(23, 2.5);
+      ctx.lineTo(23.5, 5.5);
+      ctx.lineTo(16.5, 6.5);
       ctx.closePath();
       ctx.fill();
+    }
+
+    // ==========================================
+    // Render Captured Prey clutched in Talons
+    // ==========================================
+    if (this.hasPrey) {
+      ctx.save();
+      // Draw clutched white dove beneath the falcon's torso
+      ctx.translate(4, 9);
+      ctx.rotate(0.2);
+
+      // Dove body
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 11, 6.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Dove wing & shadow
+      ctx.fillStyle = '#cbd5e1';
+      ctx.beginPath();
+      ctx.ellipse(-2, -1, 8, 4, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Dove tail
+      ctx.fillStyle = '#f1f5f9';
+      ctx.beginPath();
+      ctx.moveTo(-9, 0);
+      ctx.lineTo(-17, -4);
+      ctx.lineTo(-18, 2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Dove head & beak
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(9, 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath();
+      ctx.moveTo(12, 1);
+      ctx.lineTo(16, 3);
+      ctx.lineTo(12, 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Falcon's golden talons tightly gripping around prey
+      ctx.strokeStyle = '#d5a84a';
+      ctx.lineWidth = 1.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-4, -6);
+      ctx.lineTo(-2, 3);
+      ctx.lineTo(3, 4);
+
+      ctx.moveTo(2, -6);
+      ctx.lineTo(5, 3);
+      ctx.lineTo(9, 3);
+      ctx.stroke();
+
+      ctx.restore();
+    } else if (divePose) {
+      // Standard empty talons during dive
+      const talonAlpha = Math.min(0.9, diveTuck * 1.45);
+      ctx.save();
+      ctx.globalAlpha = talonAlpha;
+      ctx.strokeStyle = '#d5a84a';
+      ctx.lineWidth = 1.35;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(1, 6);
+      ctx.lineTo(7, 10);
+      ctx.lineTo(13, 9);
+      ctx.moveTo(7, 10);
+      ctx.lineTo(11, 14);
+      ctx.moveTo(6, 5);
+      ctx.lineTo(11, 9);
+      ctx.lineTo(16, 8);
+      ctx.moveTo(11, 9);
+      ctx.lineTo(15, 13);
+      ctx.stroke();
+      ctx.restore();
     }
 
     ctx.restore();
