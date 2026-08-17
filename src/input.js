@@ -3,6 +3,7 @@ export default class Input {
     this.keys = new Set();
     this.flapQueued = 0;
     this.resetQueued = 0;
+    this.testWaterQueued = 0; // DEBUG: T key — spawn near water
 
     const onKeyDown = (e) => {
       const k = this._normalize(e);
@@ -13,6 +14,7 @@ export default class Input {
 
       if (k === 'space' && !alreadyHeld) this.flapQueued += 1;
       if (k === 'r' && !alreadyHeld) this.resetQueued += 1;
+      if (k === 't' && !alreadyHeld) this.testWaterQueued += 1;
 
       if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'space', 'r'].includes(k)) {
         e.preventDefault();
@@ -61,6 +63,12 @@ export default class Input {
   consumeReset() {
     const pressed = this.resetQueued > 0;
     this.resetQueued = 0;
+    return pressed;
+  }
+
+  consumeTestWater() {
+    const pressed = this.testWaterQueued > 0;
+    this.testWaterQueued = 0;
     return pressed;
   }
 }

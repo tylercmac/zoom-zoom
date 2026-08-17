@@ -59,9 +59,23 @@ let timeScale = 1.0;
 let slowMoTimer = 0;
 
 const gameState = {
-  phase: 'HUNT', // 'HUNT' | 'ASCEND' | 'DELIVERED'
+  phase: 'HUNT', // 'HUNT' | 'ASCEND' | 'DELIVERED' | 'SHARK_CHASE' | 'DEVOURED'
   strikeSpeed: 0,
-  ascentStartTime: 0
+  ascentStartTime: 0,
+  priorPhase: 'HUNT'
+};
+
+// Shark — live world-space state
+const shark = {
+  x: 200,
+  y: world.ground.y + 28,
+  vx: 80,
+  vy: 0,
+  chasing: false,
+  frenzySpeed: 380,
+  patrolSpeed: 180,
+  patrolDir: 1,
+  patrolTimer: 8
 };
 
 function spawnFeatherBurst(x, y, count = 85, playerVx = 0, playerVy = 0) {
@@ -303,6 +317,114 @@ function updateCamera() {
   camera.y = Math.max(0, Math.min(world.height - screenH, player.pos.y - screenH * 0.5));
 }
 
+function updateShark(dt) {
+  const playerCX = player.pos.x + player.size.w * 0.5;
+  const playerCY = player.pos.y + player.size.h * 0.5;
+  const inWater = player.pos.y + player.size.h >= world.ground.y;
+
+  if (shark.chasing) {
+    // Aggressively home toward player
+    const dx = playerCX - shark.x;
+    const dy = playerCY - shark.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1) {
+      shark.vx += (dx / dist) * shark.frenzySpeed * 4 * dt;
+      shark.vy += (dy / dist) * shark.frenzySpeed * 4 * dt;
+      const spd = Math.hypot(shark.vx, shark.vy);
+      if (spd > shark.frenzySpeed) {
+        shark.vx = (shark.vx / spd) * shark.frenzySpeed;
+        shark.vy = (shark.vy / spd) * shark.frenzySpeed;
+      }
+    }
+    shark.x += shark.vx * dt;
+    shark.y += shark.vy * dt;
+    shark.x = Math.max(80, Math.min(world.width - 80, shark.x));
+
+    // DEVOURED — shark caught player still in water
+    if (dist < 55 && inWater && gameState.phase === 'SHARK_CHASE') {
+      gameState.phase = 'DEVOURED';
+      shark.chasing = false;
+      if (warningHideTimeout) clearTimeout(warningHideTimeout);
+      bannerTitle.textContent = '🦈 DEVOURED BY SHARK!';
+      bannerSubtitle.innerHTML = `You went too deep! Rapidly flap <kbd>Space</kbd> &amp; <kbd>W</kbd> to escape next time! · Press <kbd>R</kbd> to restart`;
+      interceptBanner.className = 'intercept-banner warning';
+      hudObjective.textContent = '💀 You were eaten. Press R to try again.';
+    }
+
+    // Player escaped water — shark breaks off
+    if (!inWater && gameState.phase === 'SHARK_CHASE') {
+      shark.chasing = false;
+      gameState.phase = gameState.priorPhase;
+      shark.vy = 500;
+      shark.vx *= 0.3;
+      if (warningHideTimeout) clearTimeout(warningHideTimeout);
+      bannerTitle.textContent = '💨 BARELY ESCAPED THE SHARK!';
+      bannerSubtitle.innerHTML = `You got out of the water just in time! Keep flying!`;
+      interceptBanner.className = 'intercept-banner';
+      warningHideTimeout = setTimeout(() => interceptBanner.classList.add('hidden'), 3500);
+      hudObjective.textContent = gameState.phase === 'ASCEND'
+        ? 'Objective: Ascend to the cliff nest at 50% altitude and flare wings to land gently.'
+        : 'Objective: Manage dive speed to hit the 200–210 MPH window and arrest before water.';
+    }
+  } else {
+    // Patrol slowly
+    shark.patrolTimer -= dt;
+    if (shark.patrolTimer <= 0) {
+      shark.patrolDir *= -1;
+      shark.patrolTimer = 6 + Math.random() * 8;
+    }
+    const targetVx = shark.patrolDir * shark.patrolSpeed;
+    shark.vx += (targetVx - shark.vx) * Math.min(1, dt * 1.2);
+    // Spring back to water surface
+    shark.vy += (world.ground.y + 28 - shark.y) * 3 * dt;
+    shark.vy *= Math.pow(0.85, dt * 60);
+    shark.x += shark.vx * dt;
+    shark.y += shark.vy * dt;
+    shark.x = Math.max(80, Math.min(world.width - 80, shark.x));
+
+    // Player hit the water — check impact speed first
+    if (inWater && gameState.phase !== 'DEVOURED' && gameState.phase !== 'SHARK_CHASE') {
+      const impactMph = Math.hypot(player.vel.x, player.vel.y) * 0.032;
+
+      if (impactMph > 50) {
+        // Hit water too fast — instant death
+        gameState.phase = 'DEVOURED';
+        shark.chasing = false;
+        if (warningHideTimeout) clearTimeout(warningHideTimeout);
+        bannerTitle.textContent = '💦 CRASHED INTO THE WATER!';
+        bannerSubtitle.innerHTML = `You hit the water at <strong>${Math.round(impactMph)} MPH</strong>! Flare wings before the surface to slow down. · Press <kbd>R</kbd> to restart`;
+        interceptBanner.className = 'intercept-banner warning';
+        hudObjective.textContent = '💀 You hit the water too fast. Press R to try again.';
+        return;
+      }
+
+      // Safe entry speed — shark attack!
+      shark.chasing = true;
+      gameState.priorPhase = gameState.phase;
+      gameState.phase = 'SHARK_CHASE';
+
+      // Guarantee shark spawns at least 800px away from player
+      const minDist = 800;
+      const dx = playerCX - shark.x;
+      const currentDist = Math.abs(dx);
+      if (currentDist < minDist) {
+        // Push shark to the opposite side at minimum distance
+        shark.x = playerCX + (dx >= 0 ? -minDist : minDist);
+        shark.x = Math.max(80, Math.min(world.width - 80, shark.x));
+        shark.vx = 0;
+        shark.vy = 0;
+      }
+      shark.vx = (playerCX > shark.x ? 1 : -1) * shark.patrolSpeed * 4;
+
+      if (warningHideTimeout) clearTimeout(warningHideTimeout);
+      bannerTitle.textContent = '🦈 SHARK ATTACK! GET OUT NOW!';
+      bannerSubtitle.innerHTML = `Rapidly flap <kbd>Space</kbd> and <kbd>W</kbd> to escape before you're eaten!`;
+      interceptBanner.className = 'intercept-banner warning';
+      hudObjective.textContent = '⚠️ SHARK INCOMING! Flap like mad — escape the water!';
+    }
+  }
+}
+
 function update(dt) {
   if (input.consumeReset()) {
     player.reset(window.innerWidth * 0.5 - 15, world.perch.y - 22);
@@ -316,14 +438,41 @@ function update(dt) {
     timeScale = 1.0;
     slowMoTimer = 0;
     gameState.phase = 'HUNT';
+    gameState.priorPhase = 'HUNT';
     gameState.strikeSpeed = 0;
+    shark.chasing = false;
+    shark.x = 200;
+    shark.y = world.ground.y + 28;
+    shark.vx = 80;
+    shark.vy = 0;
     hudObjective.textContent = 'Objective: Manage dive speed to hit the 200–210 MPH window and arrest before water.';
     if (warningHideTimeout) clearTimeout(warningHideTimeout);
     interceptBanner.className = 'intercept-banner hidden';
   }
 
-  player.update(dt, input, world.platforms);
+  // DEBUG: T key — teleport just above water surface for shark testing
+  if (input.consumeTestWater()) {
+    const spawnX = world.width * 0.5;
+    player.pos.x = spawnX - player.size.w * 0.5;
+    player.pos.y = world.ground.y - player.size.h - 80;
+    player.vel.x = 0;
+    player.vel.y = 120; // gentle fall toward water
+    player.onPerch = false;
+    player.grounded = false;
+    player.currentPlatform = null;
+    feathers.length = 0;
+    shockwaves.length = 0;
+    if (warningHideTimeout) clearTimeout(warningHideTimeout);
+    interceptBanner.className = 'intercept-banner hidden';
+    hudObjective.textContent = '[DEBUG] Teleported near water — T to repeat, R to full reset';
+  }
+
+  if (gameState.phase !== 'DEVOURED') {
+    player.update(dt, input, world.platforms);
+  }
   target.update(dt);
+  updateShark(dt);
+
   updateParticles(dt);
 
   // Check strike collision when hunting
@@ -564,29 +713,20 @@ function drawStructures() {
     ctx.stroke();
   }
 
-  // Shark — patrols back and forth near the water surface
+  // Shark — driven by live shark state object
   {
-    const sharkPeriod = 28; // seconds for a full lap
-    const sharkPhase = (now % sharkPeriod) / sharkPeriod; // 0..1
-    // Ping-pong across the world width
-    const sharkT = sharkPhase < 0.5 ? sharkPhase * 2 : (1 - sharkPhase) * 2;
-    const sharkX = g.x + 80 + sharkT * (g.w - 200);
-    const sharkFacing = sharkPhase < 0.5 ? 1 : -1; // 1 = right, -1 = left
-    const sharkY = g.y + 28; // just below water surface
-    const bodyLen = 140;
-    const bodyH = 28;
-    // Subtle tail wag
-    const tailWag = Math.sin(now * 5) * 0.18;
+    const sharkX = shark.x;
+    const sharkY = shark.y;
+    const sharkFacing = shark.vx >= 0 ? 1 : -1;
+    const bodyLen = shark.chasing ? 160 : 140;
+    const bodyH = shark.chasing ? 32 : 28;
+    // Tail wag speed ramps up when chasing
+    const tailWagSpeed = shark.chasing ? 14 : 5;
+    const tailWag = Math.sin(now * tailWagSpeed) * 0.18;
 
     ctx.save();
     ctx.translate(sharkX, sharkY);
     ctx.scale(sharkFacing, 1);
-
-    // Shadow beneath shark
-    ctx.fillStyle = 'rgba(10, 30, 55, 0.35)';
-    ctx.beginPath();
-    ctx.ellipse(0, bodyH + 10, bodyLen * 0.48, 8, 0, 0, Math.PI * 2);
-    ctx.fill();
 
     // --- Body ---
     ctx.fillStyle = '#4a6d7c';
@@ -687,8 +827,10 @@ function drawStructures() {
     ctx.quadraticCurveTo(-bodyLen * 0.08 * sharkFacing, -bodyH * 0.38, bodyLen * 0.0, -bodyH * 0.55);
     ctx.stroke();
 
-    ctx.restore();
+    ctx.restore(); // end translate+scale
   }
+
+
 
   // 2. Starting Perch at Top (Golden Gate red bridge architecture)
   ctx.fillStyle = '#8d1d1d';
