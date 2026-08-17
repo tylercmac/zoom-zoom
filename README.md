@@ -1,19 +1,6 @@
-Sky Hopper — Minimal Flying Game Starter
+# Falcon Smash
 
-This project has been pivoted into a tiny, self-contained flying game prototype in plain HTML/JavaScript (ES modules). It implements:
-
-- Canvas-based rendering
-- A bird avatar with gravity and flap physics
-- A stamina meter that drains on flaps and recharges while gliding
-- Endless obstacles and score tracking
-- Keyboard and mouse input for quick testing
-
-Files created:
-- index.html — entry page
-- styles.css — HUD and full-screen styling
-- src/input.js — keyboard + pointer input helpers
-- src/player.js — bird physics and drawing
-- src/main.js — game loop, obstacle spawning, HUD, and win/lose logic
+Dive off the golden gate bridge as a peregrine falcon to stoop at over 200+mph and hit your prey! Don't go too fast, or you'll hit the bay water below and get eaten! bring your prey back up to your nest to win.
 
 Run locally:
 1) Start the included local server:
@@ -25,10 +12,25 @@ Run locally:
 Controls:
 - Space / W / mouse click to flap
 
-Extending ideas:
-- Add multiple enemy types and collectible gems
-- Add parallax backgrounds and animated clouds
-- Improve collision/particle effects and audio
-- Add start menu, pause screen, and score persistence
+MVP Features (To be implemented):
+- Add death if hit water faster than 60mph
+- implement score = time + speed on impact + bonus for landing in nest softly
+- Add raven enemies that slowly come towards you as you ascend to nest
+- move the mph indicator to just above the falcon
+- improve the background parallax landscape, add more details, more san francisco stuff
+- improve bridge details, have infrastructue more vertical and out of frame above. 
+- add ceiling for player so they cant fly off screen above bridge
+- add more distinct falcon animations, improve animations when turning, etc
+- add particle effects for flapping, diving, hitting water, etc
+- add sound effects
 
-This is intentionally lightweight so it can be expanded into a larger sky runner with minimal friction.
+Later features:
+- Different difficulties 
+   - remove speed indicator?
+   - add more enemies when ascending
+- character customization (different birds, skins, etc)
+- different goals (fly through rings, avoid obstacles, etc)
+- 
+
+
+
