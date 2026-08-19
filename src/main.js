@@ -4,8 +4,6 @@ import { TargetDove } from './target.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const speedMeter = document.getElementById('speed-meter');
-const speedReadout = document.getElementById('speed-readout');
 const miniMapDistance = document.getElementById('mini-map-distance');
 const miniMapAltitude = document.getElementById('mini-map-altitude');
 const miniMapPlayer = document.getElementById('mini-map-player');
@@ -21,11 +19,14 @@ const targetEdgeLeft = document.getElementById('target-edge-left');
 const targetEdgeRight = document.getElementById('target-edge-right');
 const targetEdgeDistLeft = document.getElementById('target-edge-dist-left');
 const targetEdgeDistRight = document.getElementById('target-edge-dist-right');
+const targetSpeedBadge = document.getElementById('target-speed-badge');
 
 const hudObjective = document.getElementById('hud-objective');
 const interceptBanner = document.getElementById('intercept-banner');
 const bannerTitle = document.getElementById('banner-title');
 const bannerSubtitle = document.getElementById('banner-subtitle');
+const runTimerEl = document.getElementById('run-timer');
+const runTimerReadout = document.getElementById('run-timer-readout');
 
 const world = {
   width: 2200,
@@ -52,17 +53,44 @@ const target = new TargetDove(targetY);
 const feathers = [];
 const heartParticles = [];
 const shockwaves = [];
+const waterSplashParticles = [];
+const underwaterBubbles = [];
 let warningHideTimeout = null;
+let screenShake = { power: 0, timer: 0 };
+
+// Run timer — starts on perch departure, stops on death or successful delivery
+const runTimer = {
+  active: false,
+  elapsed: 0,      // seconds
+  stopped: false,  // true once the run has ended (keeps final value visible)
+  outcome: null,   // 'success' | 'fail' | null
+};
+
+function spawnUnderwaterBubbles(x, y, count = 4) {
+  for (let i = 0; i < count; i++) {
+    underwaterBubbles.push({
+      x: x + (Math.random() - 0.5) * 28,
+      y: y + (Math.random() - 0.5) * 16,
+      vx: (Math.random() - 0.5) * 40,
+      vy: -Math.random() * 90 - 45,
+      radius: Math.random() * 3.8 + 1.6,
+      alpha: 0.9,
+      life: Math.random() * 1.6 + 0.9,
+      maxLife: 2.3
+    });
+  }
+}
 
 // Slow-motion bullet-time state
 let timeScale = 1.0;
 let slowMoTimer = 0;
 
 const gameState = {
-  phase: 'HUNT', // 'HUNT' | 'ASCEND' | 'DELIVERED' | 'SHARK_CHASE' | 'DEVOURED'
+  phase: 'HUNT', // 'HUNT' | 'ASCEND' | 'DELIVERED' | 'SHARK_CHASE' | 'CRASH_FLOATING' | 'DEVOURED'
   strikeSpeed: 0,
   ascentStartTime: 0,
-  priorPhase: 'HUNT'
+  priorPhase: 'HUNT',
+  crashSpeed: 0
 };
 
 // Shark — live world-space state
@@ -75,8 +103,29 @@ const shark = {
   frenzySpeed: 380,
   patrolSpeed: 180,
   patrolDir: 1,
-  patrolTimer: 8
+  patrolTimer: 8,
+  renderFacing: 1, // 1 for facing right, -1 for facing left
+  renderPitch: 0,  // radians
+  mouthGape: 0,    // 0 to 1
+  spinePhase: 0
 };
+
+function spawnWaterSplash(x, y, count = 50) {
+  for (let i = 0; i < count; i++) {
+    const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * 2.2;
+    const speed = Math.random() * 580 + 140;
+    waterSplashParticles.push({
+      x: x + (Math.random() - 0.5) * 36,
+      y: y + (Math.random() - 0.5) * 12,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      radius: Math.random() * 4.5 + 2,
+      alpha: 1,
+      life: Math.random() * 1.3 + 0.7,
+      maxLife: 2.0
+    });
+  }
+}
 
 function spawnFeatherBurst(x, y, count = 85, playerVx = 0, playerVy = 0) {
   for (let i = 0; i < count; i++) {
@@ -167,6 +216,32 @@ function updateParticles(dt) {
     h.y += h.vy * dt;
     h.alpha = Math.max(0, h.life / h.maxLife);
   }
+
+  for (let i = waterSplashParticles.length - 1; i >= 0; i--) {
+    const p = waterSplashParticles[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      waterSplashParticles.splice(i, 1);
+      continue;
+    }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 680 * dt; // Gravity pulling droplets down
+    p.vx *= Math.pow(0.96, dt * 60);
+    p.alpha = Math.max(0, p.life / p.maxLife);
+  }
+
+  for (let i = underwaterBubbles.length - 1; i >= 0; i--) {
+    const b = underwaterBubbles[i];
+    b.life -= dt;
+    if (b.life <= 0) {
+      underwaterBubbles.splice(i, 1);
+      continue;
+    }
+    b.x += (b.vx + Math.sin(performance.now() * 0.005 + b.y * 0.04) * 18) * dt;
+    b.y += b.vy * dt;
+    b.alpha = Math.max(0, b.life / b.maxLife);
+  }
 }
 
 const stars = Array.from({ length: 2600 }, () => ({
@@ -202,7 +277,7 @@ const landscapeLayers = [
   { depth: 0.008, base: 0.9, amplitude: 58, frequency: 0.008, color: 'rgba(23, 52, 74, 0.52)', seed: 4.6 }
 ];
 
-let camera = { x: 0, y: 0 };
+let camera = { x: 0, y: 0, zoom: 1.0 };
 let lastTime = performance.now();
 
 function resize() {
@@ -220,13 +295,28 @@ function formatDistance(distPx) {
 }
 
 function updateHud() {
-  const speed = Math.round(Math.hypot(player.vel.x, player.vel.y) * 0.032);
-  speedReadout.textContent = `${speed}`;
-
-  if (speed >= 200) {
-    speedMeter.className = 'lethal-speed';
+  const isRunFinished = runTimer.stopped || gameState.phase === 'DEVOURED' || gameState.phase === 'DELIVERED' || player.onPerch;
+  if (isRunFinished) {
+    targetTracker.classList.add('hidden');
   } else {
-    speedMeter.className = '';
+    targetTracker.classList.remove('hidden');
+
+    // Update bottom tracker speed indicator dynamically
+    const speed = Math.round(Math.hypot(player.vel.x, player.vel.y) * 0.032);
+    targetSpeedBadge.textContent = `${speed} MPH`;
+    if (speed >= 200 && speed <= 210) {
+      targetSpeedBadge.style.color = '#22c55e'; // sweet-spot
+      targetSpeedBadge.style.textShadow = '0 0 8px rgba(34, 197, 94, 0.6)';
+    } else if (speed > 210) {
+      targetSpeedBadge.style.color = '#f43f5e'; // overspeed
+      targetSpeedBadge.style.textShadow = '0 0 8px rgba(244, 63, 94, 0.6)';
+    } else if (speed >= 150) {
+      targetSpeedBadge.style.color = '#f59e0b'; // accelerating
+      targetSpeedBadge.style.textShadow = 'none';
+    } else {
+      targetSpeedBadge.style.color = '#38bdf8'; // cruise
+      targetSpeedBadge.style.textShadow = 'none';
+    }
   }
 
   const distanceToWater = Math.max(0, world.ground.y - (player.pos.y + player.size.h / 2));
@@ -308,19 +398,116 @@ function updateHud() {
     targetEdgeRight.classList.remove('hidden');
     targetEdgeDistRight.textContent = formattedDist;
   }
+
+  // --- Run Timer display ---
+  if (runTimer.active || runTimer.stopped) {
+    runTimerEl.classList.remove('hidden');
+    runTimerReadout.textContent = runTimer.elapsed.toFixed(2);
+    if (runTimer.stopped) {
+      runTimerEl.className = runTimer.outcome === 'success' ? 'stopped-success' : 'stopped-fail';
+    } else {
+      runTimerEl.className = 'running';
+    }
+  } else {
+    runTimerEl.className = 'hidden';
+  }
 }
 
-function updateCamera() {
+function updateCamera(dt) {
   const screenW = window.innerWidth;
   const screenH = window.innerHeight;
-  camera.x = Math.max(0, Math.min(world.width - screenW, player.pos.x - screenW * 0.45));
-  camera.y = Math.max(0, Math.min(world.height - screenH, player.pos.y - screenH * 0.5));
+
+  // Calculate dynamic FOV speed zoom — subtle pull-back (1.0 at idle, 0.90 at 210+ MPH)
+  const speedMph = Math.hypot(player.vel.x, player.vel.y) * 0.032;
+  const isFlaring = input.flap(); // Space = wing flare / brake
+  // When flaring, snap zoom back toward 1.0 faster (mild G-force sensation)
+  const targetZoom = isFlaring
+    ? 1.0
+    : 1.0 - Math.min(0.10, Math.max(0, (speedMph - 60) / 180) * 0.10);
+  const zoomLerpSpeed = isFlaring ? 6.0 : 3.0;
+  camera.zoom += (targetZoom - camera.zoom) * Math.min(1, (dt || 0.016) * zoomLerpSpeed);
+
+  const viewW = screenW / camera.zoom;
+  const viewH = screenH / camera.zoom;
+
+  camera.x = Math.max(0, Math.min(world.width - viewW, player.pos.x - viewW * 0.48));
+  camera.y = Math.max(0, Math.min(world.height - viewH, player.pos.y - viewH * 0.5));
 }
 
 function updateShark(dt) {
   const playerCX = player.pos.x + player.size.w * 0.5;
   const playerCY = player.pos.y + player.size.h * 0.5;
   const inWater = player.pos.y + player.size.h >= world.ground.y;
+
+  // Spine flex & swimming frequency
+  const spd = Math.hypot(shark.vx, shark.vy);
+  const wagFreq = shark.chasing ? 14 : Math.max(4.5, spd * 0.035);
+  shark.spinePhase += dt * wagFreq;
+
+  // Smooth facing interpolation (1 = facing right, -1 = facing left)
+  const targetFacing = shark.vx >= 0 ? 1 : -1;
+  shark.renderFacing += (targetFacing - shark.renderFacing) * Math.min(1, dt * 5.5);
+
+  // Smooth pitch angle interpolation (pitch up/down based on vy)
+  const pitchFactor = shark.renderFacing >= 0 ? 1 : -1;
+  const targetPitch = Math.max(-0.45, Math.min(0.45, (shark.vy / 280) * pitchFactor));
+  shark.renderPitch += (targetPitch - shark.renderPitch) * Math.min(1, dt * 6.5);
+
+  // Mouth gape opening wide during predatory frenzy
+  const distToPlayer = Math.hypot(playerCX - shark.x, playerCY - shark.y);
+  const targetMouth = (shark.chasing && distToPlayer < 380) ? Math.min(1, (380 - distToPlayer) / 240) : 0;
+  shark.mouthGape += (targetMouth - shark.mouthGape) * Math.min(1, dt * 7.5);
+
+  // High-Speed Underwater Plunge & Devour Sequence
+  if (gameState.phase === 'CRASH_PLUNGE' || gameState.phase === 'CRASH_FLOATING') {
+    player.pos.x += player.vel.x * dt;
+    player.pos.y += player.vel.y * dt;
+    player.isPlungingDead = true;
+
+    // Water drag & buoyancy slowing down underwater plunge
+    player.vel.y *= Math.pow(0.84, dt * 60);
+    player.vel.x *= Math.pow(0.86, dt * 60);
+
+    if (player.pos.y > world.ground.y + 20) {
+      player.vel.y -= 180 * dt;
+    }
+
+    // Spawn underwater bubbles trailing plunge path
+    spawnUnderwaterBubbles(playerCX, player.pos.y, 4);
+
+    shark.chasing = true;
+    const dx = playerCX - shark.x;
+    const dy = playerCY - shark.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist > 1) {
+      shark.vx += (dx / dist) * shark.frenzySpeed * 4.8 * dt;
+      shark.vy += (dy / dist) * shark.frenzySpeed * 4.8 * dt;
+      const currentSpd = Math.hypot(shark.vx, shark.vy);
+      if (currentSpd > shark.frenzySpeed) {
+        shark.vx = (shark.vx / currentSpd) * shark.frenzySpeed;
+        shark.vy = (shark.vy / currentSpd) * shark.frenzySpeed;
+      }
+    }
+    shark.x += shark.vx * dt;
+    shark.y += shark.vy * dt;
+    shark.x = Math.max(80, Math.min(world.width - 80, shark.x));
+
+    // When shark reaches the plunging bird body underwater -> UNDERWATER CHOMP!
+    if (dist < 55) {
+      spawnWaterSplash(playerCX, world.ground.y, 45);
+      spawnShockwave(playerCX, player.pos.y, 160);
+      spawnFeatherBurst(playerCX, player.pos.y, 35, 0, -100);
+      shark.mouthGape = 1.0;
+      player.isPlungingDead = false; // Devoured underwater!
+      player.isFloatingDead = false;
+      gameState.phase = 'DEVOURED';
+      shark.chasing = false;
+      stopRunTimer('fail');
+      // Keep the original water crash death message — don't overwrite it when shark finishes eating
+    }
+    return;
+  }
 
   if (shark.chasing) {
     // Aggressively home toward player
@@ -330,10 +517,10 @@ function updateShark(dt) {
     if (dist > 1) {
       shark.vx += (dx / dist) * shark.frenzySpeed * 4 * dt;
       shark.vy += (dy / dist) * shark.frenzySpeed * 4 * dt;
-      const spd = Math.hypot(shark.vx, shark.vy);
-      if (spd > shark.frenzySpeed) {
-        shark.vx = (shark.vx / spd) * shark.frenzySpeed;
-        shark.vy = (shark.vy / spd) * shark.frenzySpeed;
+      const currentSpd = Math.hypot(shark.vx, shark.vy);
+      if (currentSpd > shark.frenzySpeed) {
+        shark.vx = (shark.vx / currentSpd) * shark.frenzySpeed;
+        shark.vy = (shark.vy / currentSpd) * shark.frenzySpeed;
       }
     }
     shark.x += shark.vx * dt;
@@ -344,6 +531,7 @@ function updateShark(dt) {
     if (dist < 55 && inWater && gameState.phase === 'SHARK_CHASE') {
       gameState.phase = 'DEVOURED';
       shark.chasing = false;
+      stopRunTimer('fail');
       if (warningHideTimeout) clearTimeout(warningHideTimeout);
       bannerTitle.textContent = '🦈 DEVOURED BY SHARK!';
       bannerSubtitle.innerHTML = `You went too deep! Rapidly flap <kbd>Space</kbd> &amp; <kbd>W</kbd> to escape next time! · Press <kbd>R</kbd> to restart`;
@@ -358,13 +546,23 @@ function updateShark(dt) {
       shark.vy = 500;
       shark.vx *= 0.3;
       if (warningHideTimeout) clearTimeout(warningHideTimeout);
-      bannerTitle.textContent = '💨 BARELY ESCAPED THE SHARK!';
-      bannerSubtitle.innerHTML = `You got out of the water just in time! Keep flying!`;
-      interceptBanner.className = 'intercept-banner';
-      warningHideTimeout = setTimeout(() => interceptBanner.classList.add('hidden'), 3500);
-      hudObjective.textContent = gameState.phase === 'ASCEND'
-        ? 'Objective: Ascend to the cliff nest at 50% altitude and flare wings to land gently.'
-        : 'Objective: Manage dive speed to hit the 200–210 MPH window and arrest before water.';
+
+      if (gameState.phase === 'HUNT') {
+        // Escaped water but already missed the dove — run is over
+        stopRunTimer('fail');
+        bannerTitle.textContent = '💨 BARELY ESCAPED — BUT RUN IS OVER';
+        bannerSubtitle.innerHTML = `Survived the shark! But the dive window is gone. Press <kbd>R</kbd> to try again.`;
+        interceptBanner.className = 'intercept-banner warning';
+        hudObjective.textContent = 'Run over — press R to reset and try again.';
+        // Banner stays until R is pressed
+      } else {
+        // Escaped while carrying prey — keep going!
+        bannerTitle.textContent = '💨 BARELY ESCAPED THE SHARK!';
+        bannerSubtitle.innerHTML = `You got out just in time! Now get that prey to the nest!`;
+        interceptBanner.className = 'intercept-banner';
+        warningHideTimeout = setTimeout(() => interceptBanner.classList.add('hidden'), 3500);
+        hudObjective.textContent = 'Objective: Ascend to the cliff nest at 50% altitude and flare wings to land gently.';
+      }
     }
   } else {
     // Patrol slowly
@@ -382,23 +580,47 @@ function updateShark(dt) {
     shark.y += shark.vy * dt;
     shark.x = Math.max(80, Math.min(world.width - 80, shark.x));
 
-    // Player hit the water — check impact speed first
-    if (inWater && gameState.phase !== 'DEVOURED' && gameState.phase !== 'SHARK_CHASE') {
+    // Player hit the water — check impact speed first (100 MPH threshold)
+    if (inWater && gameState.phase !== 'DEVOURED' && gameState.phase !== 'CRASH_PLUNGE' && gameState.phase !== 'CRASH_FLOATING' && gameState.phase !== 'SHARK_CHASE') {
       const impactMph = Math.hypot(player.vel.x, player.vel.y) * 0.032;
 
-      if (impactMph > 50) {
-        // Hit water too fast — instant death
-        gameState.phase = 'DEVOURED';
-        shark.chasing = false;
+      if (impactMph > 100) {
+        // Slam into water over 100 MPH — kinetic underwater plunge!
+        gameState.phase = 'CRASH_PLUNGE';
+        gameState.crashSpeed = Math.round(impactMph);
+        player.isPlungingDead = true;
+        stopRunTimer('fail');
+
+        // Plunge initial underwater momentum & depth target
+        const impactVelY = player.vel.y;
+        player.vel.y = Math.min(1600, Math.max(450, impactVelY * 0.45));
+        player.vel.x *= 0.35;
+        player.pos.y = world.ground.y + 12;
+
+        spawnWaterSplash(playerCX, world.ground.y, 90);
+        spawnShockwave(playerCX, world.ground.y, 280);
+        spawnFeatherBurst(playerCX, world.ground.y, 45, player.vel.x, player.vel.y);
+
         if (warningHideTimeout) clearTimeout(warningHideTimeout);
-        bannerTitle.textContent = '💦 CRASHED INTO THE WATER!';
-        bannerSubtitle.innerHTML = `You hit the water at <strong>${Math.round(impactMph)} MPH</strong>! Flare wings before the surface to slow down. · Press <kbd>R</kbd> to restart`;
+        bannerTitle.textContent = `💦 KINETIC WATER PLUNGE AT ${Math.round(impactMph)} MPH!`;
+        bannerSubtitle.innerHTML = `You slammed into the water at <strong>${Math.round(impactMph)} MPH</strong>! Plunging deep underwater... shark incoming!`;
         interceptBanner.className = 'intercept-banner warning';
-        hudObjective.textContent = '💀 You hit the water too fast. Press R to try again.';
+        hudObjective.textContent = `💀 Kinetic plunge at ${Math.round(impactMph)} MPH! Plunging deep underwater... shark incoming!`;
+
+        shark.chasing = true;
+        const minDist = 750;
+        const dx = playerCX - shark.x;
+        if (Math.abs(dx) < minDist) {
+          shark.x = playerCX + (dx >= 0 ? -minDist : minDist);
+          shark.x = Math.max(80, Math.min(world.width - 80, shark.x));
+          shark.vx = 0;
+          shark.vy = world.ground.y + 100;
+        }
+        shark.vx = (playerCX > shark.x ? 1 : -1) * shark.patrolSpeed * 4;
         return;
       }
 
-      // Safe entry speed — shark attack!
+      // Safe entry speed (<= 100 MPH) — shark attack!
       shark.chasing = true;
       gameState.priorPhase = gameState.phase;
       gameState.phase = 'SHARK_CHASE';
@@ -425,9 +647,18 @@ function updateShark(dt) {
   }
 }
 
-function update(dt) {
+function stopRunTimer(outcome) {
+  if (!runTimer.active) return;
+  runTimer.active = false;
+  runTimer.stopped = true;
+  runTimer.outcome = outcome;
+  gameState.finalTime = runTimer.elapsed;
+}
+
+function update(dt, realDt) {
   if (input.consumeReset()) {
     player.reset(window.innerWidth * 0.5 - 15, world.perch.y - 22);
+    player.isFloatingDead = false;
     player.onPerch = true;
     player.perchX = world.perch.x;
     player.perchW = world.perch.w;
@@ -435,6 +666,7 @@ function update(dt) {
     feathers.length = 0;
     heartParticles.length = 0;
     shockwaves.length = 0;
+    waterSplashParticles.length = 0;
     timeScale = 1.0;
     slowMoTimer = 0;
     gameState.phase = 'HUNT';
@@ -448,6 +680,14 @@ function update(dt) {
     hudObjective.textContent = 'Objective: Manage dive speed to hit the 200–210 MPH window and arrest before water.';
     if (warningHideTimeout) clearTimeout(warningHideTimeout);
     interceptBanner.className = 'intercept-banner hidden';
+    screenShake.power = 0;
+    screenShake.timer = 0;
+    // Reset run timer
+    runTimer.active = false;
+    runTimer.elapsed = 0;
+    runTimer.stopped = false;
+    runTimer.outcome = null;
+    gameState.finalTime = null;
   }
 
   // DEBUG: T key — teleport just above water surface for shark testing
@@ -457,18 +697,31 @@ function update(dt) {
     player.pos.y = world.ground.y - player.size.h - 80;
     player.vel.x = 0;
     player.vel.y = 120; // gentle fall toward water
+    player.isFloatingDead = false;
     player.onPerch = false;
     player.grounded = false;
     player.currentPlatform = null;
     feathers.length = 0;
     shockwaves.length = 0;
+    waterSplashParticles.length = 0;
     if (warningHideTimeout) clearTimeout(warningHideTimeout);
     interceptBanner.className = 'intercept-banner hidden';
     hudObjective.textContent = '[DEBUG] Teleported near water — T to repeat, R to full reset';
   }
 
-  if (gameState.phase !== 'DEVOURED') {
+  if (gameState.phase !== 'DEVOURED' && gameState.phase !== 'CRASH_PLUNGE' && gameState.phase !== 'CRASH_FLOATING') {
+    const wasOnPerch = player.onPerch;
     player.update(dt, input, world.platforms);
+    // Start timer the moment the bird leaves the perch
+    if (wasOnPerch && !player.onPerch && !runTimer.active && !runTimer.stopped) {
+      runTimer.active = true;
+      runTimer.elapsed = 0;
+    }
+  }
+
+  // Tick timer (use realDt so slow-motion doesn't warp the time)
+  if (runTimer.active) {
+    runTimer.elapsed += realDt;
   }
   target.update(dt);
   updateShark(dt);
@@ -512,29 +765,25 @@ function update(dt) {
       } else if (col.status === 'too_fast') {
         spawnFeatherBurst(doveCenterX, doveCenterY, 30, player.vel.x, player.vel.y);
         spawnShockwave(doveCenterX, doveCenterY, 140);
+        stopRunTimer('fail');
 
         bannerTitle.textContent = '⚠️ TOO FAST — OVERSHOT!';
-        bannerSubtitle.innerHTML = `Speed: <strong>${col.speed} MPH</strong> (Must stay in <strong>200–210 MPH</strong> window to catch without crashing!)`;
+        bannerSubtitle.innerHTML = `Speed: <strong>${col.speed} MPH</strong> (Need <strong>200–210 MPH</strong>) · Press <kbd>R</kbd> to try again`;
         interceptBanner.className = 'intercept-banner warning';
-
-        warningHideTimeout = setTimeout(() => {
-          if (gameState.phase === 'HUNT') {
-            interceptBanner.classList.add('hidden');
-          }
-        }, 3500);
+        hudObjective.textContent = 'Run over — missed the dive window. Press R to reset.';
+        if (warningHideTimeout) clearTimeout(warningHideTimeout);
+        // Banner stays until R is pressed
       } else if (col.status === 'too_slow') {
         spawnFeatherBurst(doveCenterX, doveCenterY, 20, player.vel.x, player.vel.y);
         spawnShockwave(doveCenterX, doveCenterY, 90);
+        stopRunTimer('fail');
 
         bannerTitle.textContent = '⚠️ TOO SLOW — GLANCED OFF!';
-        bannerSubtitle.innerHTML = `Speed: <strong>${col.speed} MPH</strong> (Need <strong>200–210 MPH</strong> stoop dive to strike!)`;
+        bannerSubtitle.innerHTML = `Speed: <strong>${col.speed} MPH</strong> (Need <strong>200–210 MPH</strong>) · Press <kbd>R</kbd> to try again`;
         interceptBanner.className = 'intercept-banner warning';
-
-        warningHideTimeout = setTimeout(() => {
-          if (gameState.phase === 'HUNT') {
-            interceptBanner.classList.add('hidden');
-          }
-        }, 3000);
+        hudObjective.textContent = 'Run over — missed the dive window. Press R to reset.';
+        if (warningHideTimeout) clearTimeout(warningHideTimeout);
+        // Banner stays until R is pressed
       }
     }
   }
@@ -549,10 +798,11 @@ function update(dt) {
         if (player.hasPrey && gameState.phase === 'ASCEND') {
           player.hasPrey = false;
           gameState.phase = 'DELIVERED';
+          stopRunTimer('success');
           spawnHearts(world.nest.x + 110, world.nest.y, 25);
 
           bannerTitle.textContent = '🏆 MISSION ACCOMPLISHED!';
-          bannerSubtitle.innerHTML = `Prey delivered gently to your hungry chicks! · Strike: <strong>${gameState.strikeSpeed} MPH</strong> · Landing: <strong>${attempt.speedMph} MPH (SOFT FLARE)</strong> · Press <kbd>R</kbd> to Play Again`;
+          bannerSubtitle.innerHTML = `Prey delivered gently to your hungry chicks! · Strike: <strong>${gameState.strikeSpeed} MPH</strong> · Landing: <strong>${attempt.speedMph} MPH (SOFT FLARE)</strong> · Time: <strong>${runTimer.elapsed.toFixed(2)}s</strong> · Press <kbd>R</kbd> to Play Again`;
           interceptBanner.className = 'intercept-banner';
 
           hudObjective.textContent = 'Chicks fed! Press R to hunt again.';
@@ -571,16 +821,73 @@ function update(dt) {
     }
   }
 
-  updateCamera();
+  updateCamera(dt);
   updateHud();
+  // Wall collision — left cliff & right bridge beam
+  const CLIFF_W = 90;  // left cliff thickness (player can't go behind rock)
+  const BEAM_W  = 80;  // right bridge beam thickness
+  const leftWall  = CLIFF_W;
+  const rightWall = world.width - BEAM_W;
 
-  if (player.pos.y > world.height + 100) {
-    player.pos.y = 120;
-    player.vel.y = 0;
+  const playerCX2 = player.pos.x + player.size.w * 0.5;
+  const activePhase = gameState.phase;
+  const canRagdoll = !player.onPerch && !player.isPlungingDead &&
+                     activePhase !== 'DEVOURED' && activePhase !== 'CRASH_PLUNGE';
+
+  if (canRagdoll && player.pos.x < leftWall) {
+    const impactMph = Math.abs(player.vel.x) * 0.032;
+    player.pos.x = leftWall;
+    if (impactMph > 20) {
+      // Ragdoll bounce off left cliff
+      player.vel.x = Math.abs(player.vel.x) * 0.35;
+      player.ragdolling = true;
+      player.ragdollTimer = 0.9 + impactMph * 0.004;
+      player.ragdollSpin = -(3 + impactMph * 0.06); // spin counter-clockwise
+      spawnFeatherBurst(leftWall + 20, player.pos.y + player.size.h * 0.5, 30, player.vel.x, player.vel.y * 0.5);
+      spawnShockwave(leftWall + 10, player.pos.y + player.size.h * 0.5, 100);
+      screenShake.power = Math.min(18, impactMph * 0.12);
+      screenShake.timer = 0.32;
+      if (warningHideTimeout) clearTimeout(warningHideTimeout);
+      bannerTitle.textContent = '💥 SLAMMED THE CLIFF FACE!';
+      bannerSubtitle.innerHTML = `Hit the cliff at <strong>${Math.round(impactMph)} MPH</strong> — ragdolling down!`;
+      interceptBanner.className = 'intercept-banner warning';
+      warningHideTimeout = setTimeout(() => interceptBanner.classList.add('hidden'), 2800);
+    } else {
+      player.vel.x = 0;
+    }
+  } else if (canRagdoll && player.pos.x + player.size.w > rightWall) {
+    const impactMph = Math.abs(player.vel.x) * 0.032;
+    player.pos.x = rightWall - player.size.w;
+    if (impactMph > 20) {
+      // Ragdoll bounce off right bridge beam
+      player.vel.x = -Math.abs(player.vel.x) * 0.35;
+      player.ragdolling = true;
+      player.ragdollTimer = 0.9 + impactMph * 0.004;
+      player.ragdollSpin = (3 + impactMph * 0.06); // spin clockwise
+      spawnFeatherBurst(rightWall - 20, player.pos.y + player.size.h * 0.5, 30, player.vel.x, player.vel.y * 0.5);
+      spawnShockwave(rightWall - 10, player.pos.y + player.size.h * 0.5, 100);
+      screenShake.power = Math.min(18, impactMph * 0.12);
+      screenShake.timer = 0.32;
+      if (warningHideTimeout) clearTimeout(warningHideTimeout);
+      bannerTitle.textContent = '💥 SLAMMED THE BRIDGE BEAM!';
+      bannerSubtitle.innerHTML = `Hit the bridge support at <strong>${Math.round(impactMph)} MPH</strong> — ragdolling down!`;
+      interceptBanner.className = 'intercept-banner warning';
+      warningHideTimeout = setTimeout(() => interceptBanner.classList.add('hidden'), 2800);
+    } else {
+      player.vel.x = 0;
+    }
+  } else if (!canRagdoll) {
+    // Dead-state players still get hard-clamped but no ragdoll
+    if (player.pos.x < 0) player.pos.x = 0;
+    if (player.pos.x + player.size.w > world.width) player.pos.x = world.width - player.size.w;
   }
 
-  if (player.pos.x < 0) player.pos.x = 0;
-  if (player.pos.x + player.size.w > world.width) player.pos.x = world.width - player.size.w;
+  // Tick screen shake
+  if (screenShake.timer > 0) {
+    screenShake.timer -= dt;
+    screenShake.power *= Math.pow(0.85, dt * 60);
+    if (screenShake.timer <= 0) screenShake.power = 0;
+  }
 }
 
 function drawBackground() {
@@ -678,10 +985,12 @@ function drawBackground() {
     ctx.restore();
   }
 
-  if (windStrength > 0.25) {
-    const vignette = ctx.createRadialGradient(width * 0.5, height * 0.52, height * 0.18, width * 0.5, height * 0.5, height * 0.82);
+  if (windStrength > 0.55) {
+    // Subtle speed vignette — barely visible darkening at the edges at very high speeds
+    const vigAlpha = (windStrength - 0.55) / 0.45 * 0.12;
+    const vignette = ctx.createRadialGradient(width * 0.5, height * 0.5, height * 0.28, width * 0.5, height * 0.5, height * 0.85);
     vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vignette.addColorStop(1, `rgba(0, 10, 24, ${windStrength * 0.32})`);
+    vignette.addColorStop(1, `rgba(0, 8, 20, ${vigAlpha})`);
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, width, height);
   }
@@ -713,121 +1022,212 @@ function drawStructures() {
     ctx.stroke();
   }
 
-  // Shark — driven by live shark state object
+  // Shark — live world-space state, organic multi-joint spine & Great White aesthetic
   {
     const sharkX = shark.x;
     const sharkY = shark.y;
-    const sharkFacing = shark.vx >= 0 ? 1 : -1;
-    const bodyLen = shark.chasing ? 160 : 140;
-    const bodyH = shark.chasing ? 32 : 28;
-    // Tail wag speed ramps up when chasing
-    const tailWagSpeed = shark.chasing ? 14 : 5;
-    const tailWag = Math.sin(now * tailWagSpeed) * 0.18;
+    const facing = shark.renderFacing;
+    const bodyLen = shark.chasing ? 165 : 145;
+    const bodyH = shark.chasing ? 38 : 32;
 
     ctx.save();
     ctx.translate(sharkX, sharkY);
-    ctx.scale(sharkFacing, 1);
+    ctx.scale(facing, 1);
+    ctx.rotate(shark.renderPitch);
 
-    // --- Body ---
-    ctx.fillStyle = '#4a6d7c';
+    // Spine flex helper: calculates transverse y-displacement along body length x
+    const flexAmp = shark.chasing ? 14 : 7;
+    const getFlex = (xNorm) => {
+      // xNorm goes from +0.5 (nose tip) to -0.6 (tail fluke tip)
+      const tailBias = Math.pow(Math.max(0, 0.5 - xNorm), 1.25);
+      return Math.sin(shark.spinePhase - xNorm * 3.8) * flexAmp * tailBias;
+    };
+
+    // --- Main Slate Body Gradient (Upper Torpedo Spine) ---
+    const bodyGrad = ctx.createLinearGradient(0, -bodyH, 0, bodyH);
+    bodyGrad.addColorStop(0, '#1c3444');
+    bodyGrad.addColorStop(0.45, '#355467');
+    bodyGrad.addColorStop(1, '#1b3240');
+    ctx.fillStyle = bodyGrad;
+
     ctx.beginPath();
-    ctx.moveTo(-bodyLen * 0.5, 0);                        // front nose tip
+    // Start at Snout Tip (+0.5 * bodyLen, 0)
+    ctx.moveTo(bodyLen * 0.5, getFlex(0.5));
+    // Dorsal curve down to tail base
     ctx.bezierCurveTo(
-      -bodyLen * 0.5 + 18, -bodyH * 0.5,                 // upper front curve
-      bodyLen * 0.28, -bodyH * 0.62,                     // upper peak
-      bodyLen * 0.46, -bodyH * 0.18                       // upper tail base
+      bodyLen * 0.32, -bodyH * 0.55 + getFlex(0.32),
+      -bodyLen * 0.05, -bodyH * 0.65 + getFlex(-0.05),
+      -bodyLen * 0.38, -bodyH * 0.22 + getFlex(-0.38)
     );
-    // Tail fork — upper lobe
-    ctx.lineTo(bodyLen * 0.5 + Math.sin(tailWag + 0.3) * 22, -bodyH * 0.62);
-    ctx.lineTo(bodyLen * 0.46, 0);                        // tail notch
-    // Tail fork — lower lobe
-    ctx.lineTo(bodyLen * 0.5 + Math.sin(tailWag) * 16, bodyH * 0.55);
+
+    // Dynamic Caudal Fin (Heterocercal Crescent Tail)
+    const tailFlexUpper = getFlex(-0.58);
+    const tailFlexNotch = getFlex(-0.46);
+    const tailFlexLower = getFlex(-0.55);
+
+    // Upper tail lobe
+    ctx.lineTo(-bodyLen * 0.58, -bodyH * 0.7 + tailFlexUpper);
+    ctx.lineTo(-bodyLen * 0.46, 0 + tailFlexNotch);
+    // Lower tail lobe
+    ctx.lineTo(-bodyLen * 0.55, bodyH * 0.55 + tailFlexLower);
+
+    // Ventral curve back toward snout
     ctx.bezierCurveTo(
-      bodyLen * 0.28, bodyH * 0.72,                      // lower rear
-      -bodyLen * 0.5 + 18, bodyH * 0.58,                 // lower front
-      -bodyLen * 0.5, 0                                   // nose tip
+      -bodyLen * 0.38, bodyH * 0.22 + getFlex(-0.38),
+      -bodyLen * 0.05, bodyH * 0.62 + getFlex(-0.05),
+      bodyLen * 0.26, bodyH * 0.4 + getFlex(0.26)
+    );
+
+    // Lower Jaw & Mouth Notch (opens wide during chase)
+    const jawOpen = shark.mouthGape * 12;
+    ctx.lineTo(bodyLen * 0.3, bodyH * 0.2 + jawOpen + getFlex(0.3));
+    ctx.lineTo(bodyLen * 0.5, getFlex(0.5));
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Counter-Shading Porcelain Belly ---
+    ctx.fillStyle = '#eaf2f8';
+    ctx.beginPath();
+    ctx.moveTo(bodyLen * 0.5, getFlex(0.5));
+    ctx.bezierCurveTo(
+      bodyLen * 0.3, bodyH * 0.05 + getFlex(0.3),
+      -bodyLen * 0.05, bodyH * 0.42 + getFlex(-0.05),
+      -bodyLen * 0.36, bodyH * 0.16 + getFlex(-0.36)
+    );
+    ctx.bezierCurveTo(
+      -bodyLen * 0.18, bodyH * 0.58 + getFlex(-0.18),
+      bodyLen * 0.15, bodyH * 0.5 + getFlex(0.15),
+      bodyLen * 0.3, bodyH * 0.2 + jawOpen + getFlex(0.3)
     );
     ctx.closePath();
     ctx.fill();
 
-    // Belly (lighter underside)
-    ctx.fillStyle = '#c8dde5';
-    ctx.beginPath();
-    ctx.moveTo(-bodyLen * 0.38, 0);
-    ctx.bezierCurveTo(
-      -bodyLen * 0.2, bodyH * 0.55,
-      bodyLen * 0.14, bodyH * 0.65,
-      bodyLen * 0.42, bodyH * 0.22
-    );
-    ctx.bezierCurveTo(
-      bodyLen * 0.22, bodyH * 0.72,
-      -bodyLen * 0.1, bodyH * 0.62,
-      -bodyLen * 0.38, 0
-    );
-    ctx.fill();
-
-    // Dorsal fin (iconic top fin, slightly animated)
-    const dorsalWag = Math.sin(now * 5 + 0.5) * 3;
-    ctx.fillStyle = '#3d5a68';
-    ctx.beginPath();
-    ctx.moveTo(-bodyLen * 0.04, -bodyH * 0.55);           // fin base front
-    ctx.lineTo(-bodyLen * 0.04 - 8 + dorsalWag, -bodyH * 1.55); // fin tip
-    ctx.lineTo(bodyLen * 0.14, -bodyH * 0.58);            // fin base rear
-    ctx.closePath();
-    ctx.fill();
-
-    // Pectoral fin (side fin)
-    ctx.fillStyle = '#3d5a68';
-    ctx.beginPath();
-    ctx.moveTo(-bodyLen * 0.1, bodyH * 0.1);
-    ctx.lineTo(-bodyLen * 0.06, bodyH * 0.75);
-    ctx.lineTo(bodyLen * 0.06, bodyH * 0.35);
-    ctx.closePath();
-    ctx.fill();
-
-    // Eye
-    ctx.fillStyle = '#0f172a';
-    ctx.beginPath();
-    ctx.arc(-bodyLen * 0.36, -bodyH * 0.04, 5, 0, Math.PI * 2);
-    ctx.fill();
-    // Eye glint
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.beginPath();
-    ctx.arc(-bodyLen * 0.36 + 1.5, -bodyH * 0.04 - 1.5, 1.8, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Gill slits
-    ctx.strokeStyle = 'rgba(30, 55, 72, 0.65)';
-    ctx.lineWidth = 1.5;
-    for (let g2 = 0; g2 < 4; g2++) {
-      const gx = -bodyLen * 0.26 + g2 * 8;
+    // --- Predatory Open Mouth Cavity & Serrated White Teeth ---
+    if (shark.mouthGape > 0.02 || shark.chasing || gameState.phase === 'DEVOURED') {
+      // Dark crimson throat cavity
+      ctx.fillStyle = '#450a0a';
       ctx.beginPath();
-      ctx.moveTo(gx, -bodyH * 0.3);
-      ctx.quadraticCurveTo(gx - 2, bodyH * 0.08, gx, bodyH * 0.3);
+      ctx.moveTo(bodyLen * 0.48, getFlex(0.48));
+      ctx.lineTo(bodyLen * 0.32, bodyH * 0.05 + getFlex(0.32));
+      ctx.lineTo(bodyLen * 0.3, bodyH * 0.2 + jawOpen + getFlex(0.3));
+      ctx.closePath();
+      ctx.fill();
+
+      // Sharp triangular teeth
+      ctx.fillStyle = '#ffffff';
+      const teethCount = 6;
+      for (let t = 0; t < teethCount; t++) {
+        const tFrac = t / (teethCount - 1);
+        const tx = bodyLen * 0.46 - tFrac * bodyLen * 0.14;
+        const ty = getFlex(tx / bodyLen) + (tFrac * jawOpen * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - 3, ty + 5 + jawOpen * 0.3);
+        ctx.lineTo(tx - 6, ty);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // --- Devoured Bird clutched in Shark's Jaws ---
+    if (gameState.phase === 'DEVOURED') {
+      ctx.save();
+      const mouthX = bodyLen * 0.36;
+      const mouthY = bodyH * 0.12 + getFlex(0.36) + jawOpen * 0.4;
+      ctx.translate(mouthX, mouthY);
+      ctx.rotate(-0.35);
+
+      // Limp bird torso clutched inside teeth
+      ctx.fillStyle = '#e6ded0';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 14, 7, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wet wing hanging out of shark mouth
+      ctx.fillStyle = '#354557';
+      ctx.beginPath();
+      ctx.ellipse(-6, 5, 12, 4.5, 0.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Feathers protruding from jaw
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.ellipse(8, -3, 6, 3, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // --- Dorsal Fin (Iconic sharp top fin with dynamic flex) ---
+    const dorsalX = -bodyLen * 0.05;
+    const dorsalFlex = getFlex(dorsalX / bodyLen);
+    ctx.fillStyle = '#1c3444';
+    ctx.beginPath();
+    ctx.moveTo(dorsalX + 16, -bodyH * 0.55 + dorsalFlex);          // Base front
+    ctx.quadraticCurveTo(
+      dorsalX - 4, -bodyH * 1.2 + dorsalFlex,
+      dorsalX - 18, -bodyH * 1.62 + dorsalFlex                     // Fin Tip
+    );
+    ctx.quadraticCurveTo(
+      dorsalX - 10, -bodyH * 0.9 + dorsalFlex,
+      dorsalX - 22, -bodyH * 0.5 + dorsalFlex                      // Base rear notch
+    );
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Pectoral Fin (Side fin) ---
+    const pecX = bodyLen * 0.12;
+    const pecFlex = getFlex(pecX / bodyLen);
+    ctx.fillStyle = '#264253';
+    ctx.beginPath();
+    ctx.moveTo(pecX + 8, bodyH * 0.15 + pecFlex);
+    ctx.lineTo(pecX - 18, bodyH * 0.85 + pecFlex);
+    ctx.lineTo(pecX - 6, bodyH * 0.3 + pecFlex);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Piercing Dark Eye & Specular Glint ---
+    const eyeX = bodyLen * 0.35;
+    const eyeY = -bodyH * 0.1 + getFlex(eyeX / bodyLen);
+    ctx.fillStyle = '#09101d';
+    ctx.beginPath();
+    ctx.arc(eyeX, eyeY, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Specular eye glint
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.beginPath();
+    ctx.arc(eyeX + 1.2, eyeY - 1.2, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Brow shading arc
+    ctx.strokeStyle = '#111c26';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(eyeX, eyeY - 1, 5.5, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.stroke();
+
+    // --- Gill Slits ---
+    ctx.strokeStyle = 'rgba(18, 32, 43, 0.75)';
+    ctx.lineWidth = 1.8;
+    for (let g = 0; g < 5; g++) {
+      const gx = bodyLen * 0.22 - g * 6;
+      const gFlex = getFlex(gx / bodyLen);
+      ctx.beginPath();
+      ctx.moveTo(gx, -bodyH * 0.2 + gFlex);
+      ctx.quadraticCurveTo(gx - 2, gFlex, gx, bodyH * 0.18 + gFlex);
       ctx.stroke();
     }
 
-    // Teeth (visible lower jaw, slightly open snout)
-    ctx.fillStyle = '#f1f5f9';
-    for (let t = 0; t < 5; t++) {
-      const tx = -bodyLen * 0.48 + t * 6;
-      ctx.beginPath();
-      ctx.moveTo(tx, bodyH * 0.08);
-      ctx.lineTo(tx + 2.5, bodyH * 0.26);
-      ctx.lineTo(tx + 5, bodyH * 0.08);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // Dorsal fin water cut — small white wake at the fin base
-    ctx.strokeStyle = 'rgba(200,235,255,0.55)';
-    ctx.lineWidth = 2;
+    // --- Water Foam & Spray behind slicing Dorsal Fin ---
+    ctx.strokeStyle = 'rgba(220, 245, 255, 0.75)';
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.moveTo(-bodyLen * 0.14, -bodyH * 0.55);
-    ctx.quadraticCurveTo(-bodyLen * 0.08 * sharkFacing, -bodyH * 0.38, bodyLen * 0.0, -bodyH * 0.55);
+    ctx.moveTo(dorsalX + 12, -bodyH * 0.55 + dorsalFlex);
+    ctx.quadraticCurveTo(dorsalX - 10, -bodyH * 0.45 + dorsalFlex, dorsalX - 35, -bodyH * 0.55 + dorsalFlex);
     ctx.stroke();
 
-    ctx.restore(); // end translate+scale
+    ctx.restore(); // end translate+scale+rotate
   }
 
 
@@ -862,20 +1262,150 @@ function drawStructures() {
   ctx.fillStyle = '#5d1111';
   ctx.fillRect(p.x, p.y, p.w, 3);
 
-  // 3. Cliff Nest at 50% Altitude (Left Edge Outcrop)
-  // Vertical rock face extending above and below nest
-  ctx.fillStyle = '#1e293b';
-  ctx.fillRect(0, nest.y - 600, 60, 1200);
+  // 3. Full-height Left Cliff Face
+  {
+    const cw = 90; // cliff width
+    const now2 = performance.now() * 0.001;
 
-  // Rock face cracks and shading
-  ctx.fillStyle = '#334155';
-  ctx.beginPath();
-  ctx.moveTo(0, nest.y - 300);
-  ctx.lineTo(80, nest.y - 120);
-  ctx.lineTo(40, nest.y + 180);
-  ctx.lineTo(0, nest.y + 400);
-  ctx.closePath();
-  ctx.fill();
+    // Deep rock base
+    const rockGrad = ctx.createLinearGradient(0, 0, cw, 0);
+    rockGrad.addColorStop(0, '#111827');
+    rockGrad.addColorStop(0.55, '#1e293b');
+    rockGrad.addColorStop(1, '#2d3d4f');
+    ctx.fillStyle = rockGrad;
+    ctx.fillRect(0, 0, cw, world.ground.y);
+
+    // Irregular cliff edge silhouette (jagged right face)
+    ctx.fillStyle = '#2d3d4f';
+    ctx.beginPath();
+    ctx.moveTo(cw, 0);
+    for (let yy = 0; yy <= world.ground.y; yy += 320) {
+      const jag = Math.sin(yy * 0.0031 + 1.7) * 18 + Math.sin(yy * 0.0071 + 0.4) * 9;
+      ctx.lineTo(cw + jag, yy + 160);
+      ctx.lineTo(cw + jag - 12, yy + 320);
+    }
+    ctx.lineTo(cw, world.ground.y);
+    ctx.closePath();
+    ctx.fill();
+
+    // Rock strata horizontal bands
+    ctx.strokeStyle = 'rgba(55, 75, 100, 0.55)';
+    ctx.lineWidth = 2.5;
+    for (let yy = 400; yy < world.ground.y; yy += 800) {
+      ctx.beginPath();
+      ctx.moveTo(0, yy);
+      ctx.bezierCurveTo(30, yy - 14, 60, yy + 10, cw, yy + 4);
+      ctx.stroke();
+    }
+
+    // Crack veins
+    ctx.strokeStyle = 'rgba(15, 20, 30, 0.65)';
+    ctx.lineWidth = 1.4;
+    for (let yy = 200; yy < world.ground.y; yy += 1100) {
+      ctx.beginPath();
+      ctx.moveTo(20, yy);
+      ctx.lineTo(55, yy + 180);
+      ctx.lineTo(40, yy + 310);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(50, yy + 60);
+      ctx.lineTo(80, yy + 200);
+      ctx.stroke();
+    }
+
+    // Mossy highlight edge
+    ctx.fillStyle = 'rgba(40, 60, 44, 0.45)';
+    for (let yy = 600; yy < world.ground.y; yy += 1400) {
+      ctx.beginPath();
+      ctx.ellipse(cw - 8, yy, 18, 60, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 4. Full-height Right Bridge Support Beam
+  {
+    const bx = world.width - 80;
+    const bw = 80;
+
+    // Concrete base
+    const conGrad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    conGrad.addColorStop(0, '#2c3240');
+    conGrad.addColorStop(0.35, '#3b4459');
+    conGrad.addColorStop(0.72, '#2e3648');
+    conGrad.addColorStop(1, '#1e2535');
+    ctx.fillStyle = conGrad;
+    ctx.fillRect(bx, 0, bw, world.ground.y);
+
+    // Left face edge shadow
+    ctx.fillStyle = 'rgba(10, 14, 22, 0.55)';
+    ctx.fillRect(bx, 0, 8, world.ground.y);
+
+    // Horizontal construction joints
+    ctx.strokeStyle = 'rgba(20, 28, 42, 0.8)';
+    ctx.lineWidth = 2.5;
+    for (let yy = 0; yy < world.ground.y; yy += 400) {
+      ctx.beginPath();
+      ctx.moveTo(bx, yy);
+      ctx.lineTo(bx + bw, yy);
+      ctx.stroke();
+    }
+
+    // Vertical panel seam
+    ctx.strokeStyle = 'rgba(20, 28, 42, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(bx + bw * 0.5, 0);
+    ctx.lineTo(bx + bw * 0.5, world.ground.y);
+    ctx.stroke();
+
+    // Rust stain streaks
+    ctx.strokeStyle = 'rgba(120, 60, 20, 0.28)';
+    ctx.lineWidth = 3;
+    for (let yy = 300; yy < world.ground.y; yy += 900) {
+      ctx.beginPath();
+      ctx.moveTo(bx + 22, yy);
+      ctx.lineTo(bx + 18, yy + 280);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(bx + 55, yy + 140);
+      ctx.lineTo(bx + 50, yy + 400);
+      ctx.stroke();
+    }
+
+    // Bolt circles at joints
+    ctx.fillStyle = 'rgba(18, 22, 32, 0.9)';
+    for (let yy = 400; yy < world.ground.y; yy += 400) {
+      for (const boltX of [bx + 16, bx + 64]) {
+        ctx.beginPath();
+        ctx.arc(boltX, yy, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(80, 100, 130, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(boltX, yy, 4.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Dangling cable from bridge deck above
+    ctx.strokeStyle = 'rgba(50, 60, 80, 0.7)';
+    ctx.lineWidth = 2.8;
+    for (const cableX of [bx + 20, bx + 58]) {
+      ctx.beginPath();
+      ctx.moveTo(cableX, 0);
+      // Cable sag: quadratic curve down to join beam body
+      ctx.quadraticCurveTo(cableX - 8, 600, cableX, 1200);
+      ctx.lineTo(cableX, world.ground.y);
+      ctx.stroke();
+    }
+
+    // Bridge deck cap at top (matches perch era)
+    ctx.fillStyle = '#4a3020';
+    ctx.fillRect(bx - 10, 0, bw + 10, 28);
+    ctx.fillStyle = '#6b4a30';
+    ctx.fillRect(bx - 10, 6, bw + 10, 7);
+  }
+
 
   // Outcrop ledge platform
   ctx.fillStyle = '#475569';
@@ -989,9 +1519,28 @@ function drawTarget() {
 }
 
 function drawParticles() {
-  if (feathers.length === 0 && heartParticles.length === 0 && shockwaves.length === 0) return;
+  if (feathers.length === 0 && heartParticles.length === 0 && shockwaves.length === 0 && waterSplashParticles.length === 0 && underwaterBubbles.length === 0) return;
   ctx.save();
   ctx.translate(-camera.x, -camera.y);
+
+  // Underwater Bubbles
+  for (const b of underwaterBubbles) {
+    ctx.fillStyle = `rgba(186, 230, 253, ${b.alpha * 0.75})`;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 255, 255, ${b.alpha * 0.9})`;
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+  }
+
+  // Water Splash Particles
+  for (const p of waterSplashParticles) {
+    ctx.fillStyle = `rgba(215, 245, 255, ${p.alpha * 0.9})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // Shockwaves
   for (const sw of shockwaves) {
@@ -1039,18 +1588,66 @@ function drawParticles() {
 }
 
 function drawPlayer() {
+  if (gameState.phase === 'DEVOURED') return;
   ctx.save();
   ctx.translate(-camera.x, -camera.y);
   player.draw(ctx);
+
+  // Draw MPH minimally just above the bird
+  const speed = Math.round(Math.hypot(player.vel.x, player.vel.y) * 0.032);
+  
+  // Style according to the speed zone
+  let color = '#38bdf8'; // cruise (cyan)
+  if (speed >= 200 && speed <= 210) {
+    color = '#22c55e'; // sweet-spot (neon green)
+  } else if (speed > 210) {
+    color = '#f43f5e'; // overspeed (red)
+  } else if (speed >= 150) {
+    color = '#f59e0b'; // accelerating (amber)
+  }
+
+  ctx.fillStyle = color;
+  ctx.font = 'bold 11px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  
+  // Text offset above the bird.
+  const textX = player.pos.x + player.size.w * 0.5;
+  const textY = player.pos.y - 12;
+  
+  // Draw stroke first for contrast
+  ctx.strokeStyle = 'rgba(4, 11, 26, 0.85)';
+  ctx.lineWidth = 3;
+  ctx.strokeText(`${speed} MPH`, textX, textY);
+  ctx.fillText(`${speed} MPH`, textX, textY);
+
   ctx.restore();
 }
 
 function draw() {
+  ctx.save();
+  const screenW = window.innerWidth;
+  const screenH = window.innerHeight;
+
+  // Apply screen shake offset
+  let shakeX = 0, shakeY = 0;
+  if (screenShake.power > 0.5) {
+    shakeX = (Math.random() - 0.5) * screenShake.power * 2;
+    shakeY = (Math.random() - 0.5) * screenShake.power * 2;
+  }
+
+  // Center camera zoom around viewport center for dynamic FOV scale
+  ctx.translate(screenW * 0.5 + shakeX, screenH * 0.5 + shakeY);
+  ctx.scale(camera.zoom, camera.zoom);
+  ctx.translate(-screenW * 0.5, -screenH * 0.5);
+
   drawBackground();
   drawStructures();
   drawTarget();
   drawParticles();
   drawPlayer();
+
+  ctx.restore();
 }
 
 function loop(now) {
@@ -1067,7 +1664,7 @@ function loop(now) {
 
   const dt = realDt * timeScale;
 
-  update(dt);
+  update(dt, realDt);
   draw();
   requestAnimationFrame(loop);
 }

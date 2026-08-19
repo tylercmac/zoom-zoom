@@ -94,10 +94,19 @@ export class TargetDove {
     if (dist <= hitRadius) {
       const speedMph = Math.round(Math.hypot(player.vel.x, player.vel.y) * 0.032);
 
-      if (speedMph >= 200) {
+      if (speedMph >= 200 && speedMph <= 210) {
         this.isCaught = true;
         this.strikeSpeed = speedMph;
         return { hit: true, status: 'caught', speed: speedMph };
+      } else if (speedMph > 210) {
+        if (this.tooSlowCooldown <= 0) {
+          this.tooSlowCooldown = 0.8;
+          this.startledTimer = 0.6;
+          // Startled evasive flutter boost away
+          this.facing = player.vel.x >= 0 ? 1 : -1;
+          this.pos.x += this.facing * 40;
+          return { hit: true, status: 'too_fast', speed: speedMph };
+        }
       } else {
         if (this.tooSlowCooldown <= 0) {
           this.tooSlowCooldown = 0.8;

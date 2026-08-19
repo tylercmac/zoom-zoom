@@ -13,7 +13,7 @@ Controls:
 - Space / W / mouse click to flap
 
 MVP Features (To be implemented):
-- Add death if hit water faster than 60mph
+- no penalty for hitting dove too fast - should reward the risk in the score
 - implement score = time + speed on impact + bonus for landing in nest softly
 - Add raven enemies that slowly come towards you as you ascend to nest
 - move the mph indicator to just above the falcon
@@ -28,6 +28,7 @@ Later features:
 - Different difficulties 
    - remove speed indicator?
    - add more enemies when ascending
+   - remove slow mo for higher diff
 - character customization (different birds, skins, etc)
 - different goals (fly through rings, avoid obstacles, etc)
 - 

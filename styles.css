@@ -70,47 +70,59 @@ body {
   font-style: italic;
 }
 
-#speed-meter {
+#run-timer {
   position: absolute;
   left: 50%;
   bottom: 18px;
   transform: translateX(-50%);
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 6px 14px 7px;
+  gap: 6px;
+  padding: 4px 12px 5px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(9, 15, 28, 0.48);
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(9, 15, 28, 0.44);
   backdrop-filter: blur(10px);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   z-index: 10;
-  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  transition: border-color 0.25s, box-shadow 0.25s;
 }
 
-#speed-meter.lethal-speed {
-  border-color: rgba(52, 211, 153, 0.85);
-  background: rgba(6, 44, 30, 0.75);
-  box-shadow: 0 0 24px rgba(52, 211, 153, 0.7), 0 6px 20px rgba(0,0,0,0.3);
-  animation: lethalPulse 0.8s ease-in-out infinite alternate;
+#run-timer.hidden { display: none; }
+
+#run-timer.running {
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3), 0 4px 14px rgba(0,0,0,0.25);
+  animation: timerPulse 1s ease-in-out infinite alternate;
 }
 
-#speed-meter.lethal-speed #speed-readout {
-  color: #34d399;
-  text-shadow: 0 0 12px rgba(52, 211, 153, 0.9);
+#run-timer.stopped-fail {
+  border-color: rgba(244, 63, 94, 0.55);
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.3), 0 4px 14px rgba(0,0,0,0.25);
 }
 
-#speed-meter.overspeed {
-  border-color: rgba(239, 68, 68, 0.85);
-  background: rgba(45, 10, 10, 0.75);
-  box-shadow: 0 0 24px rgba(239, 68, 68, 0.7), 0 6px 20px rgba(0,0,0,0.3);
-  animation: lethalPulse 0.4s ease-in-out infinite alternate;
+#run-timer.stopped-success {
+  border-color: rgba(34, 197, 94, 0.7);
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.45), 0 4px 14px rgba(0,0,0,0.25);
 }
 
-#speed-meter.overspeed #speed-readout {
-  color: #ef4444;
-  text-shadow: 0 0 12px rgba(239, 68, 68, 0.9);
+#run-timer-readout {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #e2f0ff;
+  min-width: 52px;
+  text-align: right;
+}
+
+#run-timer.running #run-timer-readout  { color: #7dd3fc; }
+#run-timer.stopped-fail #run-timer-readout { color: #f43f5e; }
+#run-timer.stopped-success #run-timer-readout { color: #22c55e; text-shadow: 0 0 10px rgba(34,197,94,0.7); }
+
+@keyframes timerPulse {
+  0%   { box-shadow: 0 0 8px  rgba(56,189,248,0.2), 0 4px 14px rgba(0,0,0,0.25); }
+  100% { box-shadow: 0 0 18px rgba(56,189,248,0.5), 0 4px 14px rgba(0,0,0,0.25); }
 }
 
 .speed-mini-label {
@@ -474,4 +486,15 @@ kbd {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
   }
+}
+
+.target-speed-badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: color 0.15s, text-shadow 0.15s;
 }

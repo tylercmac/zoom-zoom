@@ -31,11 +31,39 @@ export default class Player {
     this.stoopProfile = 0;
     this.perchDropTimer = 0;
     this.straightLaunchTimer = 0;
+    this.isFloatingDead = false;
+    this.isPlungingDead = false;
+    this.ragdolling = false;
+    this.ragdollTimer = 0;
+    this.ragdollSpin = 0; // angular velocity during tumble
   }
 
   update(dt, input, platforms = []) {
     this.prevPos.x = this.pos.x;
     this.prevPos.y = this.pos.y;
+
+    // Ragdoll: skip all input, just tumble under physics
+    if (this.ragdolling) {
+      this.ragdollTimer -= dt;
+      if (this.ragdollTimer <= 0) {
+        this.ragdolling = false;
+        this.ragdollSpin = 0;
+      }
+      // Apply gravity and drift
+      this.vel.y += 340 * dt;
+      this.vel.x *= Math.pow(0.97, dt * 60);
+      this.pos.x += this.vel.x * dt;
+      this.pos.y += this.vel.y * dt;
+      // Spin the bird during tumble
+      this.angle += this.ragdollSpin * dt;
+      this.ragdollSpin *= Math.pow(0.92, dt * 60);
+      // Still check water collision during ragdoll
+      const ground = platforms[0] || null;
+      if (ground) {
+        this.inWater = this.pos.y + this.size.h > ground.y;
+      }
+      return;
+    }
 
     const moveX = (input.left() ? -1 : 0) + (input.right() ? 1 : 0);
     const flapPressed = input.consumeFlap();
@@ -285,6 +313,143 @@ export default class Player {
     const tailSweep = Math.sin(this.wingPhase * 0.8 + 1.1) * 5 * (1 - diveTuck * 0.5);
 
     ctx.translate(this.pos.x + this.size.w / 2, this.pos.y + this.size.h / 2);
+
+    if (this.isFloatingDead) {
+      const now = performance.now() * 0.001;
+      const bob = Math.sin(now * 3.5) * 2.5;
+      ctx.scale(this.facing, 1);
+      ctx.rotate(0.25 + Math.sin(now * 2) * 0.08);
+
+      // Water distortion shadow under body
+      ctx.fillStyle = '#1e384c';
+      ctx.beginPath();
+      ctx.ellipse(0, bob + 3, 17, 7, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Limp belly-up body
+      ctx.fillStyle = '#e6ded0';
+      ctx.beginPath();
+      ctx.ellipse(0, bob - 1, 16, 9, -0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Back plumage wet dark patches
+      ctx.fillStyle = '#354557';
+      ctx.beginPath();
+      ctx.ellipse(-3, bob - 4, 11, 5, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Limp wet wings spreading floating in water waves
+      ctx.fillStyle = '#2d3b4b';
+      ctx.beginPath();
+      ctx.ellipse(-12, bob + 2, 14, 5.5, 0.35, 0, Math.PI * 2);
+      ctx.ellipse(8, bob + 3, 12, 4.5, -0.22, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Head resting back in water
+      ctx.fillStyle = '#202a37';
+      ctx.beginPath();
+      ctx.ellipse(14, bob - 2, 6.5, 6, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Knocked-out eye ("X")
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.4;
+      const ex = 15, ey = bob - 3;
+      ctx.beginPath();
+      ctx.moveTo(ex - 2, ey - 2); ctx.lineTo(ex + 2, ey + 2);
+      ctx.moveTo(ex + 2, ey - 2); ctx.lineTo(ex - 2, ey + 2);
+      ctx.stroke();
+
+      // Hooked raptor beak
+      ctx.fillStyle = '#d5a84a';
+      ctx.beginPath();
+      ctx.moveTo(18, bob - 1);
+      ctx.lineTo(23, bob + 1);
+      ctx.lineTo(21, bob + 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Expanding water ripple ring around floating body
+      ctx.strokeStyle = 'rgba(195, 235, 255, 0.6)';
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.ellipse(0, bob + 5, 24 + Math.sin(now * 4) * 3, 6, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+      return;
+    }
+
+    if (this.isPlungingDead) {
+      const now = performance.now() * 0.001;
+      const wobble = Math.sin(now * 6) * 0.12;
+      ctx.scale(this.facing, 1);
+      ctx.rotate(Math.PI * 0.45 + wobble); // Diving head-first into deep water
+
+      // Deep water distortion glow behind body
+      ctx.fillStyle = 'rgba(24, 76, 115, 0.6)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 20, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Torso diving into deep water
+      ctx.fillStyle = '#cbd5e1';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 16, 9, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Back plumage dark wet feathers
+      ctx.fillStyle = '#354557';
+      ctx.beginPath();
+      ctx.ellipse(-2, -3, 12, 5, 0.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wings swept back by underwater drag
+      ctx.fillStyle = '#243242';
+      ctx.beginPath();
+      ctx.moveTo(-4, -4);
+      ctx.lineTo(-24, -14);
+      ctx.lineTo(-14, 2);
+      ctx.lineTo(-24, 12);
+      ctx.lineTo(-4, 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Head pointing down into the deep blue
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.arc(14, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Knocked-out eye ("X")
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.4;
+      const ex = 15, ey = -1;
+      ctx.beginPath();
+      ctx.moveTo(ex - 2, ey - 2); ctx.lineTo(ex + 2, ey + 2);
+      ctx.moveTo(ex + 2, ey - 2); ctx.lineTo(ex - 2, ey + 2);
+      ctx.stroke();
+
+      // Beak
+      ctx.fillStyle = '#d5a84a';
+      ctx.beginPath();
+      ctx.moveTo(18, -1);
+      ctx.lineTo(23, 1);
+      ctx.lineTo(20, 3);
+      ctx.closePath();
+      ctx.fill();
+
+      // Bubble trail streaming upward behind bird body
+      ctx.strokeStyle = 'rgba(215, 245, 255, 0.75)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-16, 0); ctx.lineTo(-32 + Math.sin(now * 12) * 4, -8);
+      ctx.moveTo(-18, 2); ctx.lineTo(-36 + Math.cos(now * 14) * 4, 6);
+      ctx.stroke();
+
+      ctx.restore();
+      return;
+    }
 
     if (this.onPerch) {
       ctx.scale(this.facing, 1);
@@ -630,6 +795,96 @@ export default class Player {
       ctx.lineTo(16.5, 6.5);
       ctx.closePath();
       ctx.fill();
+    }
+
+    // =========================================================
+    // High-Speed Aerodynamic Speed Flare & Wind Streamlines
+    // =========================================================
+    const airSpeed = Math.hypot(this.vel.x, this.vel.y);
+    const speedMph = airSpeed * 0.032;
+    // Speed flare begins at 40 MPH and reaches full intensity at 200–210 MPH
+    const speedFlare = Math.min(1.0, Math.max(0, (speedMph - 40) / 160));
+
+    if (speedFlare > 0.01) {
+      const now = performance.now() * 0.001;
+      const flutterA = Math.sin(now * 52) * speedFlare * 2.2;
+      const flutterB = Math.cos(now * 64 + 1.4) * speedFlare * 1.8;
+      const flutterC = Math.sin(now * 78 + 2.8) * speedFlare * 1.5;
+
+      // 1. Radiant Torso Speed Glow (Halo)
+      const glowR = 22 + speedFlare * 24;
+      const auraGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, glowR);
+      auraGrad.addColorStop(0, `rgba(186, 230, 253, ${speedFlare * 0.55})`);
+      auraGrad.addColorStop(0.5, `rgba(56, 189, 248, ${speedFlare * 0.35})`);
+      auraGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      ctx.fillStyle = auraGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 2. High-Velocity Wingtip Vapor Trails & Speed Ribbons
+      ctx.strokeStyle = `rgba(224, 242, 254, ${speedFlare * 0.85})`;
+      ctx.lineWidth = 1.8 + speedFlare * 1.6;
+      ctx.lineCap = 'round';
+
+      // Primary Wingtip Vapor Trail
+      const trailLength = 35 + speedFlare * 75;
+      ctx.beginPath();
+      ctx.moveTo(24 * wingSpan, -10);
+      ctx.lineTo(-trailLength * wingSpan + flutterA, -22 - speedFlare * 8 + flutterC);
+      ctx.stroke();
+
+      // Secondary Wingtip Ribbon
+      ctx.strokeStyle = `rgba(56, 189, 248, ${speedFlare * 0.75})`;
+      ctx.lineWidth = 1.2 + speedFlare * 1.2;
+      ctx.beginPath();
+      ctx.moveTo(20 * wingSpan, 8);
+      ctx.lineTo(-trailLength * 0.85 * wingSpan + flutterB, 18 + speedFlare * 6 + flutterA);
+      ctx.stroke();
+
+      // 3. Nose Cone Mach Flare (Shock Envelope) at airspeeds > 110 MPH
+      if (speedMph > 110) {
+        const MachFactor = Math.min(1.0, (speedMph - 110) / 90);
+
+        // Glowing shock cone shell
+        const shockGrad = ctx.createLinearGradient(32, 0, -25, 0);
+        shockGrad.addColorStop(0, `rgba(255, 255, 255, ${MachFactor * 0.95})`);
+        shockGrad.addColorStop(0.4, `rgba(56, 189, 248, ${MachFactor * 0.65})`);
+        shockGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+
+        ctx.strokeStyle = shockGrad;
+        ctx.lineWidth = 2.2 + MachFactor * 1.4;
+        ctx.beginPath();
+        // Nose beak shock bow wave
+        ctx.moveTo(28, 0);
+        ctx.quadraticCurveTo(30, -14, -28, -20 - MachFactor * 6);
+        ctx.moveTo(28, 0);
+        ctx.quadraticCurveTo(30, 14, -28, 20 + MachFactor * 6);
+        ctx.stroke();
+
+        // Inner shock glow fill
+        ctx.fillStyle = `rgba(186, 230, 253, ${MachFactor * 0.25})`;
+        ctx.beginPath();
+        ctx.moveTo(28, 0);
+        ctx.quadraticCurveTo(30, -12, -24, -16);
+        ctx.lineTo(-12, 0);
+        ctx.lineTo(-24, 16);
+        ctx.quadraticCurveTo(30, 12, 28, 0);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // 4. Ruffled Feather Micro-Tufts (plumage micro-vibrations)
+      ctx.strokeStyle = `rgba(240, 249, 255, ${0.4 + speedFlare * 0.55})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(6, -7); ctx.lineTo(2 + flutterA, -11 + flutterB);
+      ctx.moveTo(-1, -8); ctx.lineTo(-5 + flutterB, -12 + flutterC);
+      ctx.moveTo(-8, -6); ctx.lineTo(-12 + flutterC, -9 + flutterA);
+      ctx.moveTo(-14, -3); ctx.lineTo(-18 + flutterA, -6 + flutterB);
+      ctx.moveTo(8, -4); ctx.lineTo(4 + flutterB, -8 + flutterA);
+      ctx.moveTo(-4, 0); ctx.lineTo(-8 + flutterA, -3 + flutterC);
+      ctx.stroke();
     }
 
     // ==========================================

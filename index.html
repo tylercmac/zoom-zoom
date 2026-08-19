@@ -18,9 +18,10 @@
       <div class="controls">Move: A/D or arrows · Glide: W/↑ · Dive: S/↓ · Flap: Space · Reset: R</div>
       <div id="hud-objective" class="controls note">Objective: Manage dive speed to hit the 200–210 MPH window and arrest before water.</div>
     </div>
-    <div id="speed-meter">
-      <span class="speed-mini-label">MPH</span>
-      <span id="speed-readout">0</span>
+    <div id="run-timer" class="hidden">
+      <span class="speed-mini-label">TIME</span>
+      <span id="run-timer-readout">0.00</span>
+      <span class="speed-mini-label">s</span>
     </div>
     <div id="mini-map" aria-label="Flight position map">
       <div class="mini-map-header">World</div>
@@ -43,6 +44,7 @@
         <div class="target-badge">
           <span id="target-badge-label" class="target-badge-label">TARGET DOVE</span>
           <span id="target-distance">0m</span>
+          <span id="target-speed-badge" class="target-speed-badge">0 MPH</span>
         </div>
       </div>
       <div id="target-edge-left" class="target-edge-indicator left hidden">
